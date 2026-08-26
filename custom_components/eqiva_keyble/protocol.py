@@ -49,6 +49,14 @@ class EqivaNotFoundError(EqivaProtocolError):
     """Bluetooth device is not currently known to Home Assistant."""
 
 
+class EqivaConnectionError(EqivaProtocolError):
+    """Bluetooth/GATT connection setup failed."""
+
+
+class EqivaHandshakeError(EqivaProtocolError):
+    """The Key-BLE nonce handshake failed."""
+
+
 @dataclass(slots=True)
 class EqivaStatus:
     lock_status: int
@@ -154,6 +162,9 @@ class EqivaKeyBleClient:
         self.user_key = user_key
         self.name = name
         self._client: BleakClient | None = None
+        self._send_characteristic: BleakGATTCharacteristic | None = None
+        self._receive_characteristic: BleakGATTCharacteristic | None = None
+        self._write_with_response = True
         self._received_fragments: list[bytes] = []
         self._waiters: dict[int, list[asyncio.Future[bytes]]] = {}
         self._operation_lock = asyncio.Lock()
@@ -170,23 +181,114 @@ class EqivaKeyBleClient:
         self._local_counter = 1
         self._remote_counter = 0
 
+    def _reset_gatt(self) -> None:
+        self._send_characteristic = None
+        self._receive_characteristic = None
+        self._write_with_response = True
+
+    def _fresh_ble_device(self):
+        return async_ble_device_from_address(self.hass, self.address, connectable=True)
+
     async def _connect(self) -> None:
         if self._client is not None and self._client.is_connected:
             return
-        device = async_ble_device_from_address(self.hass, self.address, connectable=True)
+
+        device = self._fresh_ble_device()
         if device is None:
             raise EqivaNotFoundError(
                 f"{self.address} wurde von Home Assistant Bluetooth noch nicht gefunden"
             )
+
         self._reset_session()
-        self._client = await establish_connection(
-            BleakClientWithServiceCache,
-            device,
-            self.name,
-            disconnected_callback=self._on_disconnect,
-            max_attempts=3,
+        self._reset_gatt()
+        _LOGGER.debug(
+            "Eqiva %s: connectable BLE device found via Home Assistant Bluetooth",
+            self.address,
         )
-        await self._client.start_notify(RECEIVE_CHARACTERISTIC_UUID, self._notification_callback)
+        try:
+            self._client = await establish_connection(
+                BleakClientWithServiceCache,
+                device,
+                self.name,
+                disconnected_callback=self._on_disconnect,
+                max_attempts=3,
+                ble_device_callback=lambda: self._fresh_ble_device() or device,
+            )
+            _LOGGER.debug("Eqiva %s: BLE connection established", self.address)
+
+            services = self._client.services
+            self._send_characteristic = services.get_characteristic(
+                SEND_CHARACTERISTIC_UUID
+            )
+            self._receive_characteristic = services.get_characteristic(
+                RECEIVE_CHARACTERISTIC_UUID
+            )
+            if self._send_characteristic is None:
+                raise EqivaConnectionError(
+                    "Eqiva Send-Characteristic wurde im GATT-Profil nicht gefunden"
+                )
+            if self._receive_characteristic is None:
+                raise EqivaConnectionError(
+                    "Eqiva Receive-Characteristic wurde im GATT-Profil nicht gefunden"
+                )
+
+            send_properties = set(self._send_characteristic.properties)
+            receive_properties = set(self._receive_characteristic.properties)
+            _LOGGER.debug(
+                "Eqiva %s: GATT send properties=%s receive properties=%s",
+                self.address,
+                sorted(send_properties),
+                sorted(receive_properties),
+            )
+
+            # Original KeyBLE hardware exposes the TX characteristic as `write`.
+            # Fall back to write-without-response for compatible variants only.
+            if "write" in send_properties:
+                self._write_with_response = True
+            elif "write-without-response" in send_properties:
+                self._write_with_response = False
+            else:
+                raise EqivaConnectionError(
+                    f"Eqiva Send-Characteristic ist nicht beschreibbar: {sorted(send_properties)}"
+                )
+
+            if not ({"notify", "indicate"} & receive_properties):
+                raise EqivaConnectionError(
+                    f"Eqiva Receive-Characteristic unterstützt keine Notifications: {sorted(receive_properties)}"
+                )
+
+            await self._client.start_notify(
+                self._receive_characteristic, self._notification_callback
+            )
+            _LOGGER.debug(
+                "Eqiva %s: notifications enabled; write_with_response=%s",
+                self.address,
+                self._write_with_response,
+            )
+        except EqivaProtocolError:
+            await self._abort_connection()
+            raise
+        except Exception as err:
+            await self._abort_connection()
+            raise EqivaConnectionError(
+                f"BLE-/GATT-Verbindungsaufbau fehlgeschlagen "
+                f"({type(err).__name__}: {err})"
+            ) from err
+
+    async def _abort_connection(self) -> None:
+        client = self._client
+        self._client = None
+        self._reset_gatt()
+        self._reset_session()
+        if client is not None and client.is_connected:
+            try:
+                await client.disconnect()
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug(
+                    "Eqiva %s: disconnect after connection error failed",
+                    self.address,
+                    exc_info=True,
+                )
 
     async def _disconnect(self) -> None:
         client = self._client
@@ -202,24 +304,30 @@ class EqivaKeyBleClient:
         finally:
             if self._client is client:
                 self._client = None
+            self._reset_gatt()
             self._reset_session()
 
-    def _on_disconnect(self, _client: BleakClient) -> None:
-        self._client = None
-        self._reset_session()
+    def _fail_waiters(self, error: Exception) -> None:
         for waiters in self._waiters.values():
             for future in waiters:
                 if not future.done():
-                    future.set_exception(EqivaProtocolError("Bluetooth-Verbindung getrennt"))
+                    future.set_exception(error)
         self._waiters.clear()
+
+    def _on_disconnect(self, _client: BleakClient) -> None:
+        self._client = None
+        self._reset_gatt()
+        self._reset_session()
+        self._fail_waiters(EqivaProtocolError("Bluetooth-Verbindung getrennt"))
 
     def _notification_callback(
         self, _characteristic: BleakGATTCharacteristic, data: bytearray
     ) -> None:
         try:
             self._handle_fragment(bytes(data))
-        except Exception:  # noqa: BLE001
+        except Exception as err:  # noqa: BLE001
             _LOGGER.exception("Fehler beim Verarbeiten einer Eqiva-BLE-Nachricht")
+            self._fail_waiters(err)
 
     def _new_waiter(self, message_type: int) -> asyncio.Future[bytes]:
         future: asyncio.Future[bytes] = asyncio.get_running_loop().create_future()
@@ -259,6 +367,7 @@ class EqivaKeyBleClient:
             self._received_fragments.append(fragment)
 
         if remaining:
+            # Acknowledge reception of all non-final fragments.
             self.hass.async_create_task(
                 self._send_message(MSG_FRAGMENT_ACK, bytes([status]), secure=False),
                 "Eqiva fragment ACK",
@@ -270,6 +379,11 @@ class EqivaKeyBleClient:
         first = fragments[0]
         message_type = first[1]
         payload = first[2:] + b"".join(part[1:] for part in fragments[1:])
+        _LOGGER.debug(
+            "Eqiva %s: received message type 0x%02X",
+            self.address,
+            message_type,
+        )
 
         if message_type & 0x80:
             if self.user_key is None or self._local_nonce is None:
@@ -307,18 +421,27 @@ class EqivaKeyBleClient:
 
     async def _write_fragment(self, fragment: bytes, wait_for_ack: bool) -> None:
         if self._client is None or not self._client.is_connected:
-            raise EqivaProtocolError("Nicht mit dem Schloss verbunden")
+            raise EqivaConnectionError("Nicht mit dem Schloss verbunden")
+        if self._send_characteristic is None:
+            raise EqivaConnectionError("Eqiva Send-Characteristic ist nicht verfügbar")
         waiter = self._new_waiter(MSG_FRAGMENT_ACK) if wait_for_ack else None
         try:
             await self._client.write_gatt_char(
-                SEND_CHARACTERISTIC_UUID, fragment, response=True
+                self._send_characteristic,
+                fragment,
+                response=self._write_with_response,
             )
             if waiter is not None:
                 await asyncio.wait_for(waiter, timeout=3.0)
-        except Exception:
+        except Exception as err:
             if waiter is not None:
                 self._cancel_waiter(MSG_FRAGMENT_ACK, waiter)
-            raise
+            if isinstance(err, EqivaProtocolError):
+                raise
+            raise EqivaConnectionError(
+                f"Schreiben auf die Eqiva GATT-Characteristic fehlgeschlagen "
+                f"({type(err).__name__}: {err})"
+            ) from err
 
     async def _send_message(self, message_type: int, data: bytes, secure: bool) -> None:
         if secure:
@@ -351,6 +474,11 @@ class EqivaKeyBleClient:
         await self._connect()
         self._local_nonce = os.urandom(8)
         waiter = self._new_waiter(MSG_CONNECTION_INFO)
+        _LOGGER.debug(
+            "Eqiva %s: sending CONNECTION_REQUEST for user id %s",
+            self.address,
+            self.user_id,
+        )
         try:
             await self._send_message(
                 MSG_CONNECTION_REQUEST,
@@ -358,11 +486,18 @@ class EqivaKeyBleClient:
                 secure=False,
             )
             await asyncio.wait_for(waiter, timeout=5.0)
+        except asyncio.TimeoutError as err:
+            self._cancel_waiter(MSG_CONNECTION_INFO, waiter)
+            raise EqivaHandshakeError(
+                "CONNECTION_INFO wurde nicht innerhalb von 5 Sekunden empfangen. "
+                "Das Schloss kann bereits durch eine andere Bluetooth-Verbindung belegt sein."
+            ) from err
         except Exception:
             self._cancel_waiter(MSG_CONNECTION_INFO, waiter)
             raise
         if self._remote_nonce is None:
-            raise EqivaProtocolError("Keine Session-Nonce vom Schloss erhalten")
+            raise EqivaHandshakeError("Keine Session-Nonce vom Schloss erhalten")
+        _LOGGER.debug("Eqiva %s: nonce handshake completed", self.address)
 
     async def pair(self, card_key: bytes) -> tuple[int, bytes]:
         if len(card_key) != 16:
@@ -392,6 +527,12 @@ class EqivaKeyBleClient:
                 try:
                     await self._send_message(MSG_PAIRING_REQUEST, payload, secure=False)
                     await asyncio.wait_for(waiter, timeout=10.0)
+                except asyncio.TimeoutError as err:
+                    self._cancel_waiter(MSG_ANSWER_WITH_SECURITY, waiter)
+                    raise EqivaProtocolError(
+                        "Keine Pairing-Antwort innerhalb von 10 Sekunden empfangen. "
+                        "Prüfe, ob die gelbe Pairing-LED am Schloss blinkt."
+                    ) from err
                 except Exception:
                     self._cancel_waiter(MSG_ANSWER_WITH_SECURITY, waiter)
                     raise
@@ -413,6 +554,13 @@ class EqivaKeyBleClient:
         try:
             await self._send_message(MSG_STATUS_REQUEST, data, secure=True)
             await asyncio.wait_for(waiter, timeout=5.0)
+        except asyncio.TimeoutError as err:
+            self._cancel_waiter(MSG_STATUS_INFO, waiter)
+            raise EqivaProtocolError(
+                "Keine STATUS_INFO-Antwort innerhalb von 5 Sekunden empfangen. "
+                "Bei vorhandenen Zugangsdaten kann dies auf eine falsche User-ID "
+                "oder einen falschen User-Key hindeuten."
+            ) from err
         except Exception:
             self._cancel_waiter(MSG_STATUS_INFO, waiter)
             raise
