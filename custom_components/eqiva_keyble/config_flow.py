@@ -141,6 +141,7 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_key_card(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
+        description_placeholders = {"error": "–"}
         if user_input is not None:
             try:
                 card = parse_key_card(user_input[CONF_KEY_CARD])
@@ -160,29 +161,37 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             except AbortFlow:
                 raise
-            except ValueError:
+            except ValueError as err:
                 errors["base"] = "invalid_key_card"
-            except EqivaNoScannerError:
+                description_placeholders["error"] = str(err)
+            except EqivaNoScannerError as err:
                 _LOGGER.exception("No connectable Home Assistant Bluetooth scanner for Eqiva")
                 errors["base"] = "no_scanner"
-            except EqivaAddressMismatchError:
+                description_placeholders["error"] = str(err)
+            except EqivaAddressMismatchError as err:
                 _LOGGER.exception("Eqiva advertisement found under a different address")
                 errors["base"] = "address_mismatch"
-            except EqivaNotFoundError:
+                description_placeholders["error"] = str(err)
+            except EqivaNotFoundError as err:
                 _LOGGER.exception("Eqiva lock was not found during pairing")
                 errors["base"] = "not_found"
-            except EqivaConnectionError:
+                description_placeholders["error"] = str(err)
+            except EqivaConnectionError as err:
                 _LOGGER.exception("Eqiva Bluetooth/GATT connection failed during pairing")
                 errors["base"] = "connection_failed"
-            except EqivaHandshakeError:
+                description_placeholders["error"] = str(err)
+            except EqivaHandshakeError as err:
                 _LOGGER.exception("Eqiva nonce handshake failed during pairing")
                 errors["base"] = "handshake_failed"
-            except EqivaProtocolError:
+                description_placeholders["error"] = str(err)
+            except EqivaProtocolError as err:
                 _LOGGER.exception("Eqiva protocol pairing failed")
                 errors["base"] = "pairing_failed"
-            except Exception:  # noqa: BLE001
+                description_placeholders["error"] = str(err)
+            except Exception as err:  # noqa: BLE001
                 _LOGGER.exception("Unexpected Eqiva pairing failure")
                 errors["base"] = "pairing_failed"
+                description_placeholders["error"] = f"{type(err).__name__}: {err}"
 
         return self.async_show_form(
             step_id="key_card",
@@ -191,17 +200,19 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_KEY_CARD): str,
             }),
             errors=errors,
+            description_placeholders=description_placeholders,
         )
 
     async def async_step_credentials(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
+        description_placeholders = {"error": "–"}
         if user_input is not None:
             try:
                 address = canonical_address(user_input[CONF_ADDRESS])
                 key = canonical_key(user_input[CONF_USER_KEY])
                 user_id = int(user_input[CONF_USER_ID])
                 if not 0 <= user_id <= 255:
-                    raise ValueError
+                    raise ValueError("User-ID muss zwischen 0 und 255 liegen")
                 await self.async_set_unique_id(address.replace(":", "").lower())
                 self._abort_if_unique_id_configured()
                 await _async_ensure_lock_seen(self.hass, address)
@@ -220,29 +231,37 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             except AbortFlow:
                 raise
-            except ValueError:
+            except ValueError as err:
                 errors["base"] = "invalid_credentials"
-            except EqivaNoScannerError:
+                description_placeholders["error"] = str(err)
+            except EqivaNoScannerError as err:
                 _LOGGER.exception("No connectable Home Assistant Bluetooth scanner for Eqiva")
                 errors["base"] = "no_scanner"
-            except EqivaAddressMismatchError:
+                description_placeholders["error"] = str(err)
+            except EqivaAddressMismatchError as err:
                 _LOGGER.exception("Eqiva advertisement found under a different address")
                 errors["base"] = "address_mismatch"
-            except EqivaNotFoundError:
+                description_placeholders["error"] = str(err)
+            except EqivaNotFoundError as err:
                 _LOGGER.exception("Eqiva lock was not found during credential validation")
                 errors["base"] = "not_found"
-            except EqivaConnectionError:
+                description_placeholders["error"] = str(err)
+            except EqivaConnectionError as err:
                 _LOGGER.exception("Eqiva Bluetooth/GATT connection failed")
                 errors["base"] = "connection_failed"
-            except EqivaHandshakeError:
+                description_placeholders["error"] = str(err)
+            except EqivaHandshakeError as err:
                 _LOGGER.exception("Eqiva nonce handshake failed")
                 errors["base"] = "handshake_failed"
-            except EqivaProtocolError:
+                description_placeholders["error"] = str(err)
+            except EqivaProtocolError as err:
                 _LOGGER.exception("Eqiva authentication/protocol validation failed")
                 errors["base"] = "authentication_failed"
-            except Exception:  # noqa: BLE001
+                description_placeholders["error"] = str(err)
+            except Exception as err:  # noqa: BLE001
                 _LOGGER.exception("Unexpected Eqiva credential validation failure")
                 errors["base"] = "cannot_connect"
+                description_placeholders["error"] = f"{type(err).__name__}: {err}"
 
         address_field = (
             vol.Required(CONF_ADDRESS, default=self._discovered_address)
@@ -258,4 +277,5 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_USER_KEY): str,
             }),
             errors=errors,
+            description_placeholders=description_placeholders,
         )
