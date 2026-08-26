@@ -1,0 +1,135 @@
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+import voluptuous as vol
+from homeassistant import config_entries
+from homeassistant.components.bluetooth import async_ble_device_from_address
+from homeassistant.config_entries import ConfigFlowResult
+from homeassistant.data_entry_flow import AbortFlow
+
+from .const import (
+    CONF_ADDRESS,
+    CONF_KEY_CARD,
+    CONF_NAME,
+    CONF_SETUP_METHOD,
+    CONF_USER_ID,
+    CONF_USER_KEY,
+    DEFAULT_NAME,
+    DOMAIN,
+    SETUP_CREDENTIALS,
+    SETUP_KEY_CARD,
+)
+from .protocol import (
+    EqivaKeyBleClient,
+    canonical_address,
+    canonical_key,
+    parse_key_card,
+)
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    VERSION = 1
+
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if user_input is not None:
+            if user_input[CONF_SETUP_METHOD] == SETUP_KEY_CARD:
+                return await self.async_step_key_card()
+            return await self.async_step_credentials()
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema({
+                vol.Required(CONF_SETUP_METHOD, default=SETUP_KEY_CARD): vol.In({
+                    SETUP_KEY_CARD: "Mit Eqiva Key Card koppeln",
+                    SETUP_CREDENTIALS: "Vorhandene KeyBLE-Zugangsdaten verwenden",
+                })
+            }),
+        )
+
+    async def async_step_key_card(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            try:
+                card = parse_key_card(user_input[CONF_KEY_CARD])
+                await self.async_set_unique_id(card.address.replace(":", "").lower())
+                self._abort_if_unique_id_configured()
+                if async_ble_device_from_address(self.hass, card.address, connectable=True) is None:
+                    errors["base"] = "not_found"
+                else:
+                    client = EqivaKeyBleClient(self.hass, card.address, name=user_input[CONF_NAME])
+                    user_id, user_key = await client.pair(card.key)
+                    return self.async_create_entry(
+                        title=user_input[CONF_NAME],
+                        data={
+                            CONF_NAME: user_input[CONF_NAME],
+                            CONF_ADDRESS: card.address,
+                            CONF_USER_ID: user_id,
+                            CONF_USER_KEY: user_key.hex(),
+                        },
+                    )
+            except AbortFlow:
+                raise
+            except ValueError:
+                errors["base"] = "invalid_key_card"
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("Eqiva pairing failed")
+                errors["base"] = "pairing_failed"
+
+        return self.async_show_form(
+            step_id="key_card",
+            data_schema=vol.Schema({
+                vol.Required(CONF_NAME, default=DEFAULT_NAME): str,
+                vol.Required(CONF_KEY_CARD): str,
+            }),
+            errors=errors,
+        )
+
+    async def async_step_credentials(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            try:
+                address = canonical_address(user_input[CONF_ADDRESS])
+                key = canonical_key(user_input[CONF_USER_KEY])
+                user_id = int(user_input[CONF_USER_ID])
+                if not 0 <= user_id <= 255:
+                    raise ValueError
+                await self.async_set_unique_id(address.replace(":", "").lower())
+                self._abort_if_unique_id_configured()
+                if async_ble_device_from_address(self.hass, address, connectable=True) is None:
+                    errors["base"] = "not_found"
+                else:
+                    client = EqivaKeyBleClient(
+                        self.hass, address, user_id=user_id, user_key=key, name=user_input[CONF_NAME]
+                    )
+                    await client.status()
+                    return self.async_create_entry(
+                        title=user_input[CONF_NAME],
+                        data={
+                            CONF_NAME: user_input[CONF_NAME],
+                            CONF_ADDRESS: address,
+                            CONF_USER_ID: user_id,
+                            CONF_USER_KEY: key.hex(),
+                        },
+                    )
+            except AbortFlow:
+                raise
+            except ValueError:
+                errors["base"] = "invalid_credentials"
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("Eqiva credential validation failed")
+                errors["base"] = "cannot_connect"
+
+        return self.async_show_form(
+            step_id="credentials",
+            data_schema=vol.Schema({
+                vol.Required(CONF_NAME, default=DEFAULT_NAME): str,
+                vol.Required(CONF_ADDRESS): str,
+                vol.Required(CONF_USER_ID): vol.Coerce(int),
+                vol.Required(CONF_USER_KEY): str,
+            }),
+            errors=errors,
+        )
