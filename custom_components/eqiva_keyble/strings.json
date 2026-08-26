@@ -21,9 +21,12 @@
     "error": {
       "not_found": "The lock has not yet been seen by Home Assistant Bluetooth.",
       "invalid_key_card": "The Key Card data is invalid.",
-      "pairing_failed": "Pairing failed. Check Bluetooth range and enable pairing mode on the lock.",
+      "pairing_failed": "Bluetooth and the KeyBLE handshake work, but pairing failed. Check the Key Card and pairing mode.",
       "invalid_credentials": "The Bluetooth address, user ID, or user key is invalid.",
-      "cannot_connect": "Connection or authentication with the lock failed."
+      "cannot_connect": "Unexpected error while accessing the lock. See the Home Assistant log for eqiva_keyble details.",
+      "connection_failed": "Bluetooth connection to the lock or access to the Eqiva GATT profile failed.",
+      "handshake_failed": "Bluetooth is connected, but the lock did not answer the KeyBLE connection handshake. Close the Eqiva app and temporarily stop other KeyBLE bridges.",
+      "authentication_failed": "The KeyBLE connection works, but authentication failed. Check the user ID and user key."
     },
     "abort": {"already_configured": "This lock is already configured."}
   }
