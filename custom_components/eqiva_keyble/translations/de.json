@@ -21,9 +21,12 @@
     "error": {
       "not_found": "Das Schloss wurde von Home Assistant Bluetooth noch nicht gefunden.",
       "invalid_key_card": "Die Key-Card-Daten sind ungültig.",
-      "pairing_failed": "Kopplung fehlgeschlagen. Prüfe die Bluetooth-Reichweite und aktiviere den Pairing-Modus am Schloss.",
+      "pairing_failed": "Bluetooth und KeyBLE-Verbindungsaufbau funktionieren, aber die Kopplung ist fehlgeschlagen. Prüfe Key Card und Pairing-Modus.",
       "invalid_credentials": "Bluetooth-Adresse, User-ID oder User-Key sind ungültig.",
-      "cannot_connect": "Verbindung oder Authentifizierung mit dem Schloss fehlgeschlagen."
+      "cannot_connect": "Unerwarteter Fehler beim Zugriff auf das Schloss. Details stehen im Home-Assistant-Protokoll unter eqiva_keyble.",
+      "connection_failed": "Bluetooth-Verbindung zum Schloss oder Zugriff auf das Eqiva-GATT-Profil fehlgeschlagen.",
+      "handshake_failed": "Bluetooth-Verbindung steht, aber das Schloss antwortet nicht auf den KeyBLE-Verbindungsaufbau. Schließe die Eqiva-App und stoppe andere KeyBLE-Bridges vorübergehend.",
+      "authentication_failed": "KeyBLE-Verbindung steht, aber die Authentifizierung ist fehlgeschlagen. Prüfe User-ID und User-Key."
     },
     "abort": {"already_configured": "Dieses Schloss ist bereits eingerichtet."}
   }
