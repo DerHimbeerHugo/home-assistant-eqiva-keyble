@@ -19,7 +19,7 @@
       }
     },
     "error": {
-      "not_found": "Das Schloss wurde von Home Assistant Bluetooth noch nicht gefunden.",
+      "not_found": "Das Schloss wurde auch nach 10 Sekunden aktiver Bluetooth-Suche nicht gefunden.",
       "invalid_key_card": "Die Key-Card-Daten sind ungültig.",
       "pairing_failed": "Bluetooth und KeyBLE-Verbindungsaufbau funktionieren, aber die Kopplung ist fehlgeschlagen. Prüfe Key Card und Pairing-Modus.",
       "invalid_credentials": "Bluetooth-Adresse, User-ID oder User-Key sind ungültig.",
