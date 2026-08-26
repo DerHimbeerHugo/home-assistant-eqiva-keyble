@@ -19,7 +19,9 @@
       }
     },
     "error": {
-      "not_found": "Das Schloss wurde auch nach 10 Sekunden aktiver Bluetooth-Suche nicht gefunden.",
+      "no_scanner": "Home Assistant hat keinen connectable Bluetooth-Adapter oder aktiven Bluetooth-Proxy. Für die native Integration muss ein Bluetooth-Empfänger in Reichweite des Schlosses vorhanden sein.",
+      "not_found": "Ein Home-Assistant-Bluetooth-Scanner ist vorhanden, aber auch nach 10 Sekunden wurde kein Eqiva-Advertisement mit Manufacturer-ID 0x1A00 in Reichweite empfangen.",
+      "address_mismatch": "Ein Eqiva-Schloss mit Manufacturer-ID 0x1A00 wurde gefunden, aber nicht unter der erwarteten Bluetooth-Adresse. Prüfe die MAC-Adresse, z. B. am alten ESPHome-Textsensor 'Mac Address'.",
       "invalid_key_card": "Die Key-Card-Daten sind ungültig.",
       "pairing_failed": "Bluetooth und KeyBLE-Verbindungsaufbau funktionieren, aber die Kopplung ist fehlgeschlagen. Prüfe Key Card und Pairing-Modus.",
       "invalid_credentials": "Bluetooth-Adresse, User-ID oder User-Key sind ungültig.",
@@ -28,6 +30,9 @@
       "handshake_failed": "Bluetooth-Verbindung steht, aber das Schloss antwortet nicht auf den KeyBLE-Verbindungsaufbau. Schließe die Eqiva-App und stoppe andere KeyBLE-Bridges vorübergehend.",
       "authentication_failed": "KeyBLE-Verbindung steht, aber die Authentifizierung ist fehlgeschlagen. Prüfe User-ID und User-Key."
     },
-    "abort": {"already_configured": "Dieses Schloss ist bereits eingerichtet."}
+    "abort": {
+      "already_configured": "Dieses Schloss ist bereits eingerichtet.",
+      "not_supported": "Dieses Bluetooth-Gerät ist kein unterstütztes Eqiva Key-BLE Schloss."
+    }
   }
 }
