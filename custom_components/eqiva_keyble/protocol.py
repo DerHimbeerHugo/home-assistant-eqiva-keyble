@@ -299,8 +299,22 @@ class EqivaKeyBleClient:
                 try:
                     await self._send_message(MSG_CLOSE_CONNECTION, b"", secure=False)
                 except Exception:  # noqa: BLE001
-                    pass
-                await client.disconnect()
+                    _LOGGER.debug(
+                        "Eqiva %s: CLOSE_CONNECTION could not be sent",
+                        self.address,
+                        exc_info=True,
+                    )
+                if client.is_connected:
+                    try:
+                        await client.disconnect()
+                    except Exception:  # noqa: BLE001
+                        # Never turn an otherwise successful lock operation into
+                        # a failure just because BlueZ/proxy cleanup is noisy.
+                        _LOGGER.debug(
+                            "Eqiva %s: BLE disconnect cleanup failed",
+                            self.address,
+                            exc_info=True,
+                        )
         finally:
             if self._client is client:
                 self._client = None
