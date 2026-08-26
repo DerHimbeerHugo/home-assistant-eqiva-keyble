@@ -1,0 +1,30 @@
+{
+  "title": "Eqiva Bluetooth Smart Lock",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Eqiva smart lock",
+        "description": "Choose how Home Assistant should authenticate with the lock.",
+        "data": {"setup_method": "Setup method"}
+      },
+      "key_card": {
+        "title": "Pair using Key Card",
+        "description": "Scan the QR code from the Eqiva Key Card. Then hold the unlock button on the lock until the yellow LED flashes and submit this form. Key Card data is not stored after pairing.",
+        "data": {"name": "Name", "key_card": "Key Card QR data"}
+      },
+      "credentials": {
+        "title": "Existing KeyBLE credentials",
+        "description": "Use an already registered user ID and its 128-bit user key.",
+        "data": {"name": "Name", "address": "Bluetooth address", "user_id": "User ID", "user_key": "User key"}
+      }
+    },
+    "error": {
+      "not_found": "The lock has not yet been seen by Home Assistant Bluetooth.",
+      "invalid_key_card": "The Key Card data is invalid.",
+      "pairing_failed": "Pairing failed. Check Bluetooth range and enable pairing mode on the lock.",
+      "invalid_credentials": "The Bluetooth address, user ID, or user key is invalid.",
+      "cannot_connect": "Connection or authentication with the lock failed."
+    },
+    "abort": {"already_configured": "This lock is already configured."}
+  }
+}
