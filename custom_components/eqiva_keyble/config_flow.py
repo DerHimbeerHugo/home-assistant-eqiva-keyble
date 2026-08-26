@@ -5,7 +5,7 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.components.bluetooth import async_ble_device_from_address
+from homeassistant.components import bluetooth
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.data_entry_flow import AbortFlow
 
@@ -35,6 +35,26 @@ from .protocol import (
 _LOGGER = logging.getLogger(__name__)
 
 
+async def _async_ensure_lock_seen(hass, address: str) -> None:
+    """Wait for Home Assistant to actually see the lock before connecting."""
+    if bluetooth.async_ble_device_from_address(hass, address, connectable=True) is not None:
+        _LOGGER.debug("Eqiva %s: already present in Home Assistant Bluetooth cache", address)
+        return
+
+    _LOGGER.debug(
+        "Eqiva %s: not present in Bluetooth cache; requesting 10 second active scan",
+        address,
+    )
+    await bluetooth.async_request_active_scan(hass, duration=10.0)
+
+    if bluetooth.async_ble_device_from_address(hass, address, connectable=True) is None:
+        raise EqivaNotFoundError(
+            f"{address} wurde auch nach 10 Sekunden aktiver Bluetooth-Suche nicht gefunden"
+        )
+
+    _LOGGER.debug("Eqiva %s: discovered during active Bluetooth scan", address)
+
+
 class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
@@ -61,20 +81,18 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 card = parse_key_card(user_input[CONF_KEY_CARD])
                 await self.async_set_unique_id(card.address.replace(":", "").lower())
                 self._abort_if_unique_id_configured()
-                if async_ble_device_from_address(self.hass, card.address, connectable=True) is None:
-                    errors["base"] = "not_found"
-                else:
-                    client = EqivaKeyBleClient(self.hass, card.address, name=user_input[CONF_NAME])
-                    user_id, user_key = await client.pair(card.key)
-                    return self.async_create_entry(
-                        title=user_input[CONF_NAME],
-                        data={
-                            CONF_NAME: user_input[CONF_NAME],
-                            CONF_ADDRESS: card.address,
-                            CONF_USER_ID: user_id,
-                            CONF_USER_KEY: user_key.hex(),
-                        },
-                    )
+                await _async_ensure_lock_seen(self.hass, card.address)
+                client = EqivaKeyBleClient(self.hass, card.address, name=user_input[CONF_NAME])
+                user_id, user_key = await client.pair(card.key)
+                return self.async_create_entry(
+                    title=user_input[CONF_NAME],
+                    data={
+                        CONF_NAME: user_input[CONF_NAME],
+                        CONF_ADDRESS: card.address,
+                        CONF_USER_ID: user_id,
+                        CONF_USER_KEY: user_key.hex(),
+                    },
+                )
             except AbortFlow:
                 raise
             except ValueError:
@@ -115,22 +133,20 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     raise ValueError
                 await self.async_set_unique_id(address.replace(":", "").lower())
                 self._abort_if_unique_id_configured()
-                if async_ble_device_from_address(self.hass, address, connectable=True) is None:
-                    errors["base"] = "not_found"
-                else:
-                    client = EqivaKeyBleClient(
-                        self.hass, address, user_id=user_id, user_key=key, name=user_input[CONF_NAME]
-                    )
-                    await client.status()
-                    return self.async_create_entry(
-                        title=user_input[CONF_NAME],
-                        data={
-                            CONF_NAME: user_input[CONF_NAME],
-                            CONF_ADDRESS: address,
-                            CONF_USER_ID: user_id,
-                            CONF_USER_KEY: key.hex(),
-                        },
-                    )
+                await _async_ensure_lock_seen(self.hass, address)
+                client = EqivaKeyBleClient(
+                    self.hass, address, user_id=user_id, user_key=key, name=user_input[CONF_NAME]
+                )
+                await client.status()
+                return self.async_create_entry(
+                    title=user_input[CONF_NAME],
+                    data={
+                        CONF_NAME: user_input[CONF_NAME],
+                        CONF_ADDRESS: address,
+                        CONF_USER_ID: user_id,
+                        CONF_USER_KEY: key.hex(),
+                    },
+                )
             except AbortFlow:
                 raise
             except ValueError:
