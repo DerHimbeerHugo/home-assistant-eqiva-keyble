@@ -22,7 +22,11 @@ from .const import (
     SETUP_KEY_CARD,
 )
 from .protocol import (
+    EqivaConnectionError,
+    EqivaHandshakeError,
     EqivaKeyBleClient,
+    EqivaNotFoundError,
+    EqivaProtocolError,
     canonical_address,
     canonical_key,
     parse_key_card,
@@ -75,8 +79,20 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 raise
             except ValueError:
                 errors["base"] = "invalid_key_card"
+            except EqivaNotFoundError:
+                _LOGGER.exception("Eqiva lock was not found during pairing")
+                errors["base"] = "not_found"
+            except EqivaConnectionError:
+                _LOGGER.exception("Eqiva Bluetooth/GATT connection failed during pairing")
+                errors["base"] = "connection_failed"
+            except EqivaHandshakeError:
+                _LOGGER.exception("Eqiva nonce handshake failed during pairing")
+                errors["base"] = "handshake_failed"
+            except EqivaProtocolError:
+                _LOGGER.exception("Eqiva protocol pairing failed")
+                errors["base"] = "pairing_failed"
             except Exception:  # noqa: BLE001
-                _LOGGER.exception("Eqiva pairing failed")
+                _LOGGER.exception("Unexpected Eqiva pairing failure")
                 errors["base"] = "pairing_failed"
 
         return self.async_show_form(
@@ -119,8 +135,20 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 raise
             except ValueError:
                 errors["base"] = "invalid_credentials"
+            except EqivaNotFoundError:
+                _LOGGER.exception("Eqiva lock was not found during credential validation")
+                errors["base"] = "not_found"
+            except EqivaConnectionError:
+                _LOGGER.exception("Eqiva Bluetooth/GATT connection failed")
+                errors["base"] = "connection_failed"
+            except EqivaHandshakeError:
+                _LOGGER.exception("Eqiva nonce handshake failed")
+                errors["base"] = "handshake_failed"
+            except EqivaProtocolError:
+                _LOGGER.exception("Eqiva authentication/protocol validation failed")
+                errors["base"] = "authentication_failed"
             except Exception:  # noqa: BLE001
-                _LOGGER.exception("Eqiva credential validation failed")
+                _LOGGER.exception("Unexpected Eqiva credential validation failure")
                 errors["base"] = "cannot_connect"
 
         return self.async_show_form(
