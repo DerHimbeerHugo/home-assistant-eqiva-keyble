@@ -1,0 +1,30 @@
+{
+  "title": "Eqiva Bluetooth Smart Lock",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Eqiva Türschloss einrichten",
+        "description": "Wähle, wie Home Assistant mit dem Schloss verbunden werden soll.",
+        "data": {"setup_method": "Einrichtungsmethode"}
+      },
+      "key_card": {
+        "title": "Mit Key Card koppeln",
+        "description": "Scanne den QR-Code der Eqiva Key Card. Halte anschließend am Schloss die Entriegeln-Taste gedrückt, bis die gelbe LED blinkt, und klicke dann auf Senden. Die Key-Card-Daten werden nach erfolgreicher Kopplung nicht gespeichert.",
+        "data": {"name": "Name", "key_card": "QR-Code-Daten der Key Card"}
+      },
+      "credentials": {
+        "title": "Vorhandene KeyBLE-Zugangsdaten",
+        "description": "Verwende eine bereits registrierte User-ID und den zugehörigen 128-Bit User-Key.",
+        "data": {"name": "Name", "address": "Bluetooth-Adresse", "user_id": "User-ID", "user_key": "User-Key"}
+      }
+    },
+    "error": {
+      "not_found": "Das Schloss wurde von Home Assistant Bluetooth noch nicht gefunden.",
+      "invalid_key_card": "Die Key-Card-Daten sind ungültig.",
+      "pairing_failed": "Kopplung fehlgeschlagen. Prüfe die Bluetooth-Reichweite und aktiviere den Pairing-Modus am Schloss.",
+      "invalid_credentials": "Bluetooth-Adresse, User-ID oder User-Key sind ungültig.",
+      "cannot_connect": "Verbindung oder Authentifizierung mit dem Schloss fehlgeschlagen."
+    },
+    "abort": {"already_configured": "Dieses Schloss ist bereits eingerichtet."}
+  }
+}
