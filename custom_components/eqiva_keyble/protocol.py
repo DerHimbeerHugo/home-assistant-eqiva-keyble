@@ -10,6 +10,7 @@ from typing import Final
 
 from bleak import BleakClient
 from bleak.backends.characteristic import BleakGATTCharacteristic
+from bleak.exc import BleakGATTProtocolError, BleakGATTProtocolErrorCode
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from homeassistant.components.bluetooth import async_ble_device_from_address
@@ -193,87 +194,117 @@ class EqivaKeyBleClient:
         if self._client is not None and self._client.is_connected:
             return
 
-        device = self._fresh_ble_device()
-        if device is None:
-            raise EqivaNotFoundError(
-                f"{self.address} wurde von Home Assistant Bluetooth noch nicht gefunden"
-            )
-
         self._reset_session()
         self._reset_gatt()
-        _LOGGER.debug(
-            "Eqiva %s: connectable BLE device found via Home Assistant Bluetooth",
-            self.address,
+        last_error: Exception | None = None
+
+        for attempt in range(1, 3):
+            device = self._fresh_ble_device()
+            if device is None:
+                raise EqivaNotFoundError(
+                    f"{self.address} wurde von Home Assistant Bluetooth noch nicht gefunden"
+                )
+
+            stage = f"BLE-Verbindung / GATT-Serviceauflösung (Versuch {attempt}/2)"
+            _LOGGER.debug(
+                "Eqiva %s: starting %s",
+                self.address,
+                stage,
+            )
+            try:
+                self._client = await establish_connection(
+                    BleakClientWithServiceCache,
+                    device,
+                    self.name,
+                    disconnected_callback=self._on_disconnect,
+                    max_attempts=1,
+                    use_services_cache=attempt == 1,
+                )
+                _LOGGER.debug("Eqiva %s: BLE connection established", self.address)
+
+                stage = "GATT-Characteristics auflösen"
+                services = self._client.services
+                self._send_characteristic = services.get_characteristic(
+                    SEND_CHARACTERISTIC_UUID
+                )
+                self._receive_characteristic = services.get_characteristic(
+                    RECEIVE_CHARACTERISTIC_UUID
+                )
+                if self._send_characteristic is None:
+                    raise EqivaConnectionError(
+                        "Eqiva Send-Characteristic wurde im GATT-Profil nicht gefunden"
+                    )
+                if self._receive_characteristic is None:
+                    raise EqivaConnectionError(
+                        "Eqiva Receive-Characteristic wurde im GATT-Profil nicht gefunden"
+                    )
+
+                send_properties = set(self._send_characteristic.properties)
+                receive_properties = set(self._receive_characteristic.properties)
+                _LOGGER.debug(
+                    "Eqiva %s: GATT send properties=%s receive properties=%s",
+                    self.address,
+                    sorted(send_properties),
+                    sorted(receive_properties),
+                )
+
+                if "write" in send_properties:
+                    self._write_with_response = True
+                elif "write-without-response" in send_properties:
+                    self._write_with_response = False
+                else:
+                    raise EqivaConnectionError(
+                        f"Eqiva Send-Characteristic ist nicht beschreibbar: {sorted(send_properties)}"
+                    )
+
+                if not ({"notify", "indicate"} & receive_properties):
+                    raise EqivaConnectionError(
+                        f"Eqiva Receive-Characteristic unterstützt keine Notifications: {sorted(receive_properties)}"
+                    )
+
+                stage = "Notifications aktivieren"
+                await self._client.start_notify(
+                    self._receive_characteristic, self._notification_callback
+                )
+                _LOGGER.debug(
+                    "Eqiva %s: notifications enabled; write_with_response=%s",
+                    self.address,
+                    self._write_with_response,
+                )
+                return
+
+            except EqivaProtocolError:
+                await self._abort_connection()
+                raise
+            except BleakGATTProtocolError as err:
+                last_error = err
+                await self._abort_connection()
+                if (
+                    err.code == BleakGATTProtocolErrorCode.UNLIKELY_ERROR
+                    and attempt == 1
+                ):
+                    _LOGGER.warning(
+                        "Eqiva %s: GATT 0x0E during %s; retrying after 1.5 seconds without service cache",
+                        self.address,
+                        stage,
+                    )
+                    await asyncio.sleep(1.5)
+                    continue
+                raise EqivaConnectionError(
+                    f"{stage} fehlgeschlagen "
+                    f"({type(err).__name__}: {err})"
+                ) from err
+            except Exception as err:
+                last_error = err
+                await self._abort_connection()
+                raise EqivaConnectionError(
+                    f"{stage} fehlgeschlagen "
+                    f"({type(err).__name__}: {err})"
+                ) from err
+
+        raise EqivaConnectionError(
+            f"BLE-/GATT-Verbindungsaufbau nach zwei Versuchen fehlgeschlagen: {last_error}"
         )
-        try:
-            self._client = await establish_connection(
-                BleakClientWithServiceCache,
-                device,
-                self.name,
-                disconnected_callback=self._on_disconnect,
-                max_attempts=3,
-                ble_device_callback=lambda: self._fresh_ble_device() or device,
-            )
-            _LOGGER.debug("Eqiva %s: BLE connection established", self.address)
-
-            services = self._client.services
-            self._send_characteristic = services.get_characteristic(
-                SEND_CHARACTERISTIC_UUID
-            )
-            self._receive_characteristic = services.get_characteristic(
-                RECEIVE_CHARACTERISTIC_UUID
-            )
-            if self._send_characteristic is None:
-                raise EqivaConnectionError(
-                    "Eqiva Send-Characteristic wurde im GATT-Profil nicht gefunden"
-                )
-            if self._receive_characteristic is None:
-                raise EqivaConnectionError(
-                    "Eqiva Receive-Characteristic wurde im GATT-Profil nicht gefunden"
-                )
-
-            send_properties = set(self._send_characteristic.properties)
-            receive_properties = set(self._receive_characteristic.properties)
-            _LOGGER.debug(
-                "Eqiva %s: GATT send properties=%s receive properties=%s",
-                self.address,
-                sorted(send_properties),
-                sorted(receive_properties),
-            )
-
-            # Original KeyBLE hardware exposes the TX characteristic as `write`.
-            # Fall back to write-without-response for compatible variants only.
-            if "write" in send_properties:
-                self._write_with_response = True
-            elif "write-without-response" in send_properties:
-                self._write_with_response = False
-            else:
-                raise EqivaConnectionError(
-                    f"Eqiva Send-Characteristic ist nicht beschreibbar: {sorted(send_properties)}"
-                )
-
-            if not ({"notify", "indicate"} & receive_properties):
-                raise EqivaConnectionError(
-                    f"Eqiva Receive-Characteristic unterstützt keine Notifications: {sorted(receive_properties)}"
-                )
-
-            await self._client.start_notify(
-                self._receive_characteristic, self._notification_callback
-            )
-            _LOGGER.debug(
-                "Eqiva %s: notifications enabled; write_with_response=%s",
-                self.address,
-                self._write_with_response,
-            )
-        except EqivaProtocolError:
-            await self._abort_connection()
-            raise
-        except Exception as err:
-            await self._abort_connection()
-            raise EqivaConnectionError(
-                f"BLE-/GATT-Verbindungsaufbau fehlgeschlagen "
-                f"({type(err).__name__}: {err})"
-            ) from err
 
     async def _abort_connection(self) -> None:
         client = self._client
@@ -308,8 +339,6 @@ class EqivaKeyBleClient:
                     try:
                         await client.disconnect()
                     except Exception:  # noqa: BLE001
-                        # Never turn an otherwise successful lock operation into
-                        # a failure just because BlueZ/proxy cleanup is noisy.
                         _LOGGER.debug(
                             "Eqiva %s: BLE disconnect cleanup failed",
                             self.address,
@@ -381,7 +410,6 @@ class EqivaKeyBleClient:
             self._received_fragments.append(fragment)
 
         if remaining:
-            # Acknowledge reception of all non-final fragments.
             self.hass.async_create_task(
                 self._send_message(MSG_FRAGMENT_ACK, bytes([status]), secure=False),
                 "Eqiva fragment ACK",
