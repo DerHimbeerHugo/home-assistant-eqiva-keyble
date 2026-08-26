@@ -34,9 +34,38 @@ from .protocol import (
 
 _LOGGER = logging.getLogger(__name__)
 
+EQIVA_MANUFACTURER_ID = 0x1A00
+
+
+class EqivaNoScannerError(EqivaNotFoundError):
+    """Home Assistant has no connectable Bluetooth scanner."""
+
+
+class EqivaAddressMismatchError(EqivaNotFoundError):
+    """An Eqiva advertisement was found under another Bluetooth address."""
+
+
+def _eqiva_discoveries(hass) -> list:
+    """Return connectable Eqiva advertisements known to Home Assistant."""
+    return [
+        info
+        for info in bluetooth.async_discovered_service_info(hass, connectable=True)
+        if EQIVA_MANUFACTURER_ID in info.manufacturer_data
+    ]
+
 
 async def _async_ensure_lock_seen(hass, address: str) -> None:
     """Wait for Home Assistant to actually see the lock before connecting."""
+    scanner_count = bluetooth.async_scanner_count(hass, connectable=True)
+    _LOGGER.debug(
+        "Eqiva discovery: %s connectable Home Assistant Bluetooth scanner(s)",
+        scanner_count,
+    )
+    if scanner_count == 0:
+        raise EqivaNoScannerError(
+            "Home Assistant hat keinen connectable Bluetooth-Adapter oder Bluetooth-Proxy"
+        )
+
     if bluetooth.async_ble_device_from_address(hass, address, connectable=True) is not None:
         _LOGGER.debug("Eqiva %s: already present in Home Assistant Bluetooth cache", address)
         return
@@ -47,16 +76,52 @@ async def _async_ensure_lock_seen(hass, address: str) -> None:
     )
     await bluetooth.async_request_active_scan(hass, duration=10.0)
 
-    if bluetooth.async_ble_device_from_address(hass, address, connectable=True) is None:
-        raise EqivaNotFoundError(
-            f"{address} wurde auch nach 10 Sekunden aktiver Bluetooth-Suche nicht gefunden"
+    if bluetooth.async_ble_device_from_address(hass, address, connectable=True) is not None:
+        _LOGGER.debug("Eqiva %s: discovered during active Bluetooth scan", address)
+        return
+
+    discoveries = _eqiva_discoveries(hass)
+    if discoveries:
+        discovered_addresses = sorted({info.address.upper() for info in discoveries})
+        _LOGGER.warning(
+            "Eqiva advertisement(s) with manufacturer ID 0x1A00 found at %s, "
+            "but requested address was %s",
+            discovered_addresses,
+            address,
+        )
+        raise EqivaAddressMismatchError(
+            "Eqiva-Advertisement 0x1A00 gefunden, aber nicht unter der erwarteten Adresse"
         )
 
-    _LOGGER.debug("Eqiva %s: discovered during active Bluetooth scan", address)
+    raise EqivaNotFoundError(
+        f"{address} wurde auch nach 10 Sekunden aktiver Bluetooth-Suche nicht gefunden; "
+        "kein Eqiva-Advertisement mit Manufacturer-ID 0x1A00 empfangen"
+    )
 
 
 class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
+
+    def __init__(self) -> None:
+        self._discovered_address: str | None = None
+
+    async def async_step_bluetooth(self, discovery_info) -> ConfigFlowResult:
+        """Handle native Home Assistant Bluetooth discovery."""
+        if EQIVA_MANUFACTURER_ID not in discovery_info.manufacturer_data:
+            return self.async_abort(reason="not_supported")
+
+        address = canonical_address(discovery_info.address)
+        await self.async_set_unique_id(address.replace(":", "").lower())
+        self._abort_if_unique_id_configured()
+        self._discovered_address = address
+        self.context["title_placeholders"] = {
+            "name": discovery_info.name or address,
+        }
+        _LOGGER.debug(
+            "Eqiva %s discovered by manufacturer ID 0x1A00 via Home Assistant Bluetooth",
+            address,
+        )
+        return await self.async_step_user()
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
@@ -97,6 +162,12 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 raise
             except ValueError:
                 errors["base"] = "invalid_key_card"
+            except EqivaNoScannerError:
+                _LOGGER.exception("No connectable Home Assistant Bluetooth scanner for Eqiva")
+                errors["base"] = "no_scanner"
+            except EqivaAddressMismatchError:
+                _LOGGER.exception("Eqiva advertisement found under a different address")
+                errors["base"] = "address_mismatch"
             except EqivaNotFoundError:
                 _LOGGER.exception("Eqiva lock was not found during pairing")
                 errors["base"] = "not_found"
@@ -151,6 +222,12 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 raise
             except ValueError:
                 errors["base"] = "invalid_credentials"
+            except EqivaNoScannerError:
+                _LOGGER.exception("No connectable Home Assistant Bluetooth scanner for Eqiva")
+                errors["base"] = "no_scanner"
+            except EqivaAddressMismatchError:
+                _LOGGER.exception("Eqiva advertisement found under a different address")
+                errors["base"] = "address_mismatch"
             except EqivaNotFoundError:
                 _LOGGER.exception("Eqiva lock was not found during credential validation")
                 errors["base"] = "not_found"
@@ -167,11 +244,16 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.exception("Unexpected Eqiva credential validation failure")
                 errors["base"] = "cannot_connect"
 
+        address_field = (
+            vol.Required(CONF_ADDRESS, default=self._discovered_address)
+            if self._discovered_address
+            else vol.Required(CONF_ADDRESS)
+        )
         return self.async_show_form(
             step_id="credentials",
             data_schema=vol.Schema({
                 vol.Required(CONF_NAME, default=DEFAULT_NAME): str,
-                vol.Required(CONF_ADDRESS): str,
+                address_field: str,
                 vol.Required(CONF_USER_ID): vol.Coerce(int),
                 vol.Required(CONF_USER_KEY): str,
             }),
