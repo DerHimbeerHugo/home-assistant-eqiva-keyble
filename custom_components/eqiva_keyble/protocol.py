@@ -252,9 +252,6 @@ class EqivaKeyBleClient:
         last_error: Exception | None = None
 
         for attempt in range(1, 3):
-            # Important for this lock: a failed GATT discovery may leave BlueZ with a
-            # physical connection although establish_connection() never returned a
-            # client object to us. Clean that target-specific stale connection first.
             await self._clear_stale_connection()
             if attempt > 1:
                 await asyncio.sleep(1.5)
@@ -320,14 +317,37 @@ class EqivaKeyBleClient:
                         f"{sorted(receive_properties)}"
                     )
 
-                stage = "Notifications aktivieren"
+                # Give the lock a short quiet period after service discovery before
+                # touching the CCCD/notification path. On local BlueZ, Bleak 3 can
+                # use either AcquireNotify or StartNotify. Eqiva/eQ-3 devices are
+                # known to be unusually sensitive around notification setup, so try
+                # the alternative BlueZ path first and keep the standard path as the
+                # second clean-connection attempt.
+                await asyncio.sleep(0.25)
+                backend_id = str(getattr(self._client, "backend_id", "")).lower()
+                use_acquire_notify = "bluez" in backend_id and attempt == 1
+                notify_mode = "AcquireNotify" if use_acquire_notify else "StartNotify"
+                stage = f"Notifications aktivieren ({notify_mode})"
+                _LOGGER.debug(
+                    "Eqiva %s: enabling notifications using %s (backend=%s)",
+                    self.address,
+                    notify_mode,
+                    backend_id or "unknown",
+                )
+                notify_kwargs = (
+                    {"bluez": {"use_start_notify": False}}
+                    if use_acquire_notify
+                    else {}
+                )
                 await self._client.start_notify(
                     self._receive_characteristic,
                     self._notification_callback,
+                    **notify_kwargs,
                 )
                 _LOGGER.debug(
-                    "Eqiva %s: notifications enabled; write_with_response=%s",
+                    "Eqiva %s: notifications enabled via %s; write_with_response=%s",
                     self.address,
+                    notify_mode,
                     self._write_with_response,
                 )
                 return
@@ -356,8 +376,6 @@ class EqivaKeyBleClient:
                 last_error = err
                 await self._abort_connection()
                 await self._clear_stale_connection()
-                # A stale target connection may surface as an out-of-slot error.
-                # Give the second attempt one clean chance as well.
                 if attempt == 1 and "connection slot" in str(err).lower():
                     _LOGGER.warning(
                         "Eqiva %s: connection slot unavailable during %s; retrying after stale cleanup",
