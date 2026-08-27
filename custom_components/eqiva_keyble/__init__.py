@@ -15,9 +15,11 @@ from . import secure_trace_patch as _eqiva_secure_trace_patch  # noqa: F401
 # v29 established the proven transport baseline: notifications arrive without
 # an active CCCD write, so the failed SMP/CCCD experiments remain disabled.
 from . import v29_diagnostic_patch as _eqiva_v29_diagnostic_patch  # noqa: F401
-# v32 stops protocol-byte experiments and tests a freshly registered KeyBLE
-# user through the existing Key-Card config-flow path.
+# v32 keeps the successful fresh Key-Card pairing path.
 from . import v32_pairing_probe as _eqiva_v32_pairing_probe  # noqa: F401
+# v33 makes the local raw hci path resilient against Home Assistant's short-lived
+# current scanner-path cache and actively rescans before declaring it unavailable.
+from . import v33_path_resilience_patch as _eqiva_v33_path_resilience_patch  # noqa: F401
 from .const import CONF_ADDRESS, CONF_NAME, CONF_USER_ID, CONF_USER_KEY
 from .coordinator import EqivaCoordinator
 from .protocol import EqivaKeyBleClient, canonical_key
