@@ -11,7 +11,7 @@ from .protocol import (
     _pad_end,
 )
 
-_RAW_MARKER = "RAW-PDU-v25"
+_RAW_MARKER = "RAW-PDU-v26"
 
 _ORIGINAL_SEND_MESSAGE = EqivaKeyBleClient._send_message
 _ORIGINAL_REQUEST_STATUS = EqivaKeyBleClient.request_status
@@ -49,10 +49,7 @@ def _remember_secure_tx(
     )
     payload = encrypted + counter.to_bytes(2, "big") + auth
     wire = bytes([message_type]) + payload
-    chunks = [
-        wire[index:index + 15]
-        for index in range(0, len(wire), 15)
-    ] or [b""]
+    chunks = [wire[index:index + 15] for index in range(0, len(wire), 15)] or [b""]
     frames: list[bytes] = []
     for index, chunk in enumerate(chunks):
         remaining = len(chunks) - index - 1
