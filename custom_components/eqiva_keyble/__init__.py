@@ -12,6 +12,10 @@ from . import bluez_notify_patch as _eqiva_transport_patch  # noqa: F401
 # Add reproducible secure-frame diagnostics without changing the working raw
 # ATT transport path. This records only session nonces/frame bytes, never keys.
 from . import secure_trace_patch as _eqiva_secure_trace_patch  # noqa: F401
+# ESPHome accepts a peer-driven BLE security request on the existing link. Patch
+# HaMgmtClient.pair for Eqiva to mirror that passive Just-Works behavior instead
+# of issuing an active MGMT Pair Device command.
+from . import passive_security_patch as _eqiva_passive_security_patch  # noqa: F401
 from .const import CONF_ADDRESS, CONF_NAME, CONF_USER_ID, CONF_USER_KEY
 from .coordinator import EqivaCoordinator
 from .protocol import EqivaKeyBleClient, canonical_key
