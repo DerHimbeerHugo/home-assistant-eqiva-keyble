@@ -23,7 +23,7 @@ from .protocol import (
 from .raw_att_client import EqivaRawATTClient
 
 _LOGGER = logging.getLogger(__name__)
-_RAW_MARKER = "RAW-PDU-v16"
+_RAW_MARKER = "RAW-PDU-v17"
 
 
 def _local_raw_path(self: EqivaKeyBleClient):
@@ -108,11 +108,9 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
             path.advertisement.rssi,
         )
 
-        # Home Assistant monkey-patches bleak.BleakClient to HaBleakClientWrapper,
-        # which deliberately ignores a custom backend at construction time and
-        # chooses its own backend during connect(). For this one Eqiva-specific
-        # path we must use the original BleakClient saved by habluetooth before
-        # that monkey-patch, otherwise EqivaRawATTClient is never instantiated.
+        # Home Assistant monkey-patches bleak.BleakClient to HaBleakClientWrapper.
+        # For this Eqiva-specific path use the original BleakClient saved by
+        # habluetooth so EqivaRawATTClient is instantiated directly.
         client = ORIGINAL_BLEAK_CLIENT(
             device,
             disconnected_callback=self._on_disconnect,
@@ -162,7 +160,7 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
 
             send_properties = set(self._send_characteristic.properties)
             receive_properties = set(self._receive_characteristic.properties)
-            if not ({"write", "write-without-response"} & send_properties):
+            if "write" not in send_properties and "write-without-response" not in send_properties:
                 raise EqivaConnectionError(
                     "Eqiva Send-Characteristic ist nicht beschreibbar: "
                     f"{sorted(send_properties)}"
@@ -173,10 +171,14 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
                     f"{sorted(receive_properties)}"
                 )
 
-            self._write_with_response = False
+            # The working ESP-IDF implementation writes Key-BLE fragments with
+            # ESP_GATT_WRITE_TYPE_RSP. The earlier response=False path was only a
+            # workaround for BlueZ after its problematic MTU exchange. On raw ATT
+            # with MTU fixed at 23, use the protocol-correct Write Request again.
+            self._write_with_response = True
 
             stage = (
-                f"{_RAW_MARKER}: direkten EqivaRawATTClient CCCD Write Command ausführen; "
+                f"{_RAW_MARKER}: CCCD als ATT Write Request aktivieren; "
                 f"backend={backend_name}; mtu={client.mtu_size}"
             )
 
@@ -193,7 +195,10 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
 
             self._local_nonce = os.urandom(8)
             waiter = self._new_waiter(MSG_CONNECTION_INFO)
-            stage = f"{_RAW_MARKER}: KeyBLE CONNECTION_REQUEST über raw ATT senden"
+            stage = (
+                f"{_RAW_MARKER}: KeyBLE CONNECTION_REQUEST als ATT Write Request senden; "
+                f"user_id={self.user_id}; mtu={client.mtu_size}"
+            )
             await self._send_message(
                 MSG_CONNECTION_REQUEST,
                 bytes([self.user_id]) + self._local_nonce,
@@ -205,8 +210,9 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
                 await asyncio.wait_for(waiter, timeout=5.0)
             except asyncio.TimeoutError as err:
                 raise EqivaHandshakeError(
-                    f"{_RAW_MARKER}: Raw ATT steht, aber das Schloss hat innerhalb von 5 Sekunden "
-                    "keine CONNECTION_INFO-Nonce geliefert."
+                    f"{_RAW_MARKER}: CCCD und CONNECTION_REQUEST wurden als ATT Write Requests "
+                    "bestätigt, aber das Schloss hat innerhalb von 5 Sekunden keine "
+                    "CONNECTION_INFO-Nonce geliefert."
                 ) from err
 
             if self._remote_nonce is None:
