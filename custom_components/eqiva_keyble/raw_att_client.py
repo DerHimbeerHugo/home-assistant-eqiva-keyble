@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Callable
 
@@ -7,7 +8,11 @@ from bleak import BleakError
 from bleak.backends.characteristic import BleakGATTCharacteristic
 from bleak.backends.descriptor import BleakGATTDescriptor
 from habluetooth.channels.att import ATTClient, CCCD_UUID
-from habluetooth.channels.l2cap import BT_SECURITY_LOW, L2CAPSocket
+from habluetooth.channels.l2cap import (
+    BT_SECURITY_LOW,
+    BT_SECURITY_MEDIUM,
+    L2CAPSocket,
+)
 from habluetooth.client_mgmt import HaMgmtClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -46,9 +51,21 @@ class EqivaRawATTClient(HaMgmtClient):
         trace.append(summary)
         del trace[:-12]
 
+    def _trace_note(self, note: str) -> None:
+        trace = getattr(self, "_eqiva_att_trace", None)
+        if trace is None:
+            trace = []
+            self._eqiva_att_trace = trace
+        trace.append(note)
+        del trace[:-12]
+
     def trace_summary(self) -> str:
         trace = getattr(self, "_eqiva_att_trace", None) or []
         return " > ".join(trace) if trace else "keine ATT-PDUs aufgezeichnet"
+
+    @property
+    def requested_security_level(self) -> int | None:
+        return self._sock.security_level if self._sock is not None else None
 
     async def _send_traced_pdu(self, data: bytes) -> None:
         self._trace_pdu("TX", data)
@@ -60,10 +77,15 @@ class EqivaRawATTClient(HaMgmtClient):
             raise BleakError("already connected")
 
         self._eqiva_att_trace: list[str] = []
+        # Eqiva v25 deliberately disables ATTClient's synchronous security retry.
+        # On ATT 0x05 habluetooth normally raises BT_SECURITY and immediately
+        # re-issues the request. The kernel security procedure is asynchronous,
+        # so that retry can race the LE encryption/authentication setup. We
+        # instead raise link security explicitly after the KeyBLE nonce exchange.
         att = ATTClient(
             send=self._send_traced_pdu,
             on_disconnect=self._handle_disconnect,
-            escalate_security=self._escalate_security,
+            escalate_security=None,
         )
         self._att = att
 
@@ -109,6 +131,34 @@ class EqivaRawATTClient(HaMgmtClient):
             self.address,
             self.mtu_size,
         )
+
+    async def request_medium_link_security(self, settle_seconds: float = 2.0) -> None:
+        """Request LE link security MEDIUM and allow the kernel security procedure to settle."""
+        sock = self._sock
+        if sock is None or not self._connected:
+            raise BleakError("Eqiva raw ATT transport is not connected")
+
+        before = sock.security_level
+        if before < BT_SECURITY_MEDIUM:
+            if not sock.set_security_level(BT_SECURITY_MEDIUM):
+                raise BleakError(
+                    f"Kernel konnte BT_SECURITY nicht von {before} auf {BT_SECURITY_MEDIUM} anheben"
+                )
+        self._trace_note(f"LINK:security={before}->{sock.security_level}")
+        _LOGGER.debug(
+            "%s: Eqiva requested L2CAP security level %s -> %s; settling %.1fs",
+            self.address,
+            before,
+            sock.security_level,
+            settle_seconds,
+        )
+
+        await asyncio.sleep(settle_seconds)
+        if self._sock is None or not self._connected:
+            raise BleakError(
+                "Eqiva BLE-Link wurde während der BT_SECURITY_MEDIUM-Aushandlung getrennt"
+            )
+        self._trace_note(f"LINK:security-settled={self._sock.security_level}")
 
     def _notification_cccd(
         self, characteristic: BleakGATTCharacteristic
