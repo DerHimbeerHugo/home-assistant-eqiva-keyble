@@ -19,11 +19,12 @@ from .protocol import (
     EqivaProtocolError,
     MSG_CONNECTION_INFO,
     MSG_CONNECTION_REQUEST,
+    MSG_STATUS_INFO,
 )
 from .raw_att_client import EqivaRawATTClient
 
 _LOGGER = logging.getLogger(__name__)
-_RAW_MARKER = "RAW-PDU-v20"
+_RAW_MARKER = "RAW-PDU-v21"
 
 
 def _remember_stage(self: EqivaKeyBleClient, value: str) -> str:
@@ -36,6 +37,14 @@ def _trace_summary(client: Any) -> str:
     if isinstance(backend, EqivaRawATTClient):
         return backend.trace_summary()
     return "raw backend nicht mehr verfügbar"
+
+
+def _pending_waiter_types(self: EqivaKeyBleClient) -> list[int]:
+    return sorted(
+        message_type
+        for message_type, waiters in self._waiters.items()
+        if any(not future.done() for future in waiters)
+    )
 
 
 def _local_raw_path(self: EqivaKeyBleClient):
@@ -62,24 +71,45 @@ def _local_raw_path(self: EqivaKeyBleClient):
 
 
 def _eqiva_on_disconnect(self: EqivaKeyBleClient, disconnected_client: Any) -> None:
-    """Preserve the exact raw ATT stage and sanitized ATT trace on a BLE drop."""
+    """Preserve raw ATT diagnostics and tolerate a fully processed STATUS_INFO."""
     stage = getattr(self, "_eqiva_raw_stage", f"{_RAW_MARKER}: Stage unbekannt")
     client = disconnected_client or self._client
     trace = _trace_summary(client)
+    pending = _pending_waiter_types(self)
+    last_rx = getattr(self, "_eqiva_last_rx_message_type", None)
+    status_ok = bool(getattr(self, "_eqiva_status_info_ok", False))
+    last_rx_text = f"0x{last_rx:02x}" if isinstance(last_rx, int) else "none"
+    pending_text = ",".join(f"0x{value:02x}" for value in pending) or "none"
 
     _LOGGER.warning(
-        "Eqiva %s disconnected during %s; sanitized ATT trace: %s",
+        "Eqiva %s disconnected during %s; last_rx=%s status_ok=%s pending=%s; sanitized ATT trace: %s",
         self.address,
         stage,
+        last_rx_text,
+        status_ok,
+        pending_text,
         trace,
     )
 
     self._client = None
     self._reset_gatt()
     self._reset_session()
+
+    # Eqiva may close the BLE link immediately after delivering STATUS_INFO.
+    # ATT notification dispatch is synchronous, so if last_status is already set
+    # and the STATUS_INFO waiter has been removed, the operation succeeded and
+    # the following physical disconnect must not overwrite that result.
+    if status_ok and MSG_STATUS_INFO not in pending and self.last_status is not None:
+        _LOGGER.debug(
+            "Eqiva %s: accepting remote disconnect after fully processed STATUS_INFO",
+            self.address,
+        )
+        return
+
     self._fail_waiters(
         EqivaConnectionError(
             f"{_RAW_MARKER}: Bluetooth-Verbindung getrennt während: {stage}; "
+            f"last_rx={last_rx_text}; status_ok={status_ok}; pending={pending_text}; "
             f"ATT-Spur: {trace}"
         )
     )
@@ -92,6 +122,8 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
 
     self._reset_session()
     self._reset_gatt()
+    self._eqiva_last_rx_message_type = None
+    self._eqiva_status_info_ok = False
 
     if not can_use_l2cap():
         raise EqivaConnectionError(
@@ -196,16 +228,27 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
                     f"{sorted(receive_properties)}"
                 )
 
-            # v20 intentionally keeps the v19 transport behavior. This build is
-            # diagnostic: first identify the exact point and ATT metadata around
-            # the disconnect before changing another protocol variable.
+            # Keep the working v19/v20 transport: CCCD as Write Command and
+            # Key-BLE message fragments as protocol-correct Write Requests.
             self._write_with_response = True
 
             receive_characteristic = self._receive_characteristic
 
             def _raw_notify_callback(data: bytearray) -> None:
+                message_type: int | None = None
+                if len(data) >= 2 and (data[0] & 0x80):
+                    message_type = data[1]
+                    self._eqiva_last_rx_message_type = message_type
+
                 current = self._receive_characteristic or receive_characteristic
                 self._notification_callback(current, data)
+
+                if message_type == MSG_STATUS_INFO and self.last_status is not None:
+                    self._eqiva_status_info_ok = True
+                    _remember_stage(
+                        self,
+                        f"{_RAW_MARKER}: STATUS_INFO erfolgreich authentifiziert und verarbeitet",
+                    )
 
             stage = _remember_stage(
                 self,
