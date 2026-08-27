@@ -16,6 +16,9 @@ from . import secure_trace_patch as _eqiva_secure_trace_patch  # noqa: F401
 # without a CCCD write and falls back on the same connection to the proven CCCD
 # Write Command after a short observation window, while exposing the GATT layout.
 from . import v29_diagnostic_patch as _eqiva_v29_diagnostic_patch  # noqa: F401
+# v30 changes one byte only: emulate the year encoding used by the ESPHome Eqiva
+# component that is known to work with this lock. All v29 transport behavior stays.
+from . import v30_esp_year_patch as _eqiva_v30_esp_year_patch  # noqa: F401
 from .const import CONF_ADDRESS, CONF_NAME, CONF_USER_ID, CONF_USER_KEY
 from .coordinator import EqivaCoordinator
 from .protocol import EqivaKeyBleClient, canonical_key
