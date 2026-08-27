@@ -18,31 +18,63 @@ _CCCD_OFF = b"\x00\x00"
 
 
 class EqivaRawATTClient(HaMgmtClient):
-    """Eqiva-specific raw L2CAP/ATT backend.
+    """Eqiva-specific raw L2CAP/ATT backend with safe ATT metadata tracing."""
 
-    Eqiva Key-BLE locks are known to misbehave when the central performs an ATT
-    Exchange MTU during connection setup. This backend deliberately leaves ATT at
-    the Bluetooth default MTU of 23 and talks to the lock directly over the kernel
-    L2CAP ATT fixed channel.
+    def _trace_pdu(self, direction: str, data: bytes) -> None:
+        """Remember only ATT opcode/handle metadata; never retain payload bytes."""
+        if not data:
+            summary = f"{direction}:empty"
+        else:
+            opcode = data[0]
+            summary = f"{direction}:0x{opcode:02x}"
 
-    The lock also disconnects when its CCCD is written as a normal ATT Write
-    Request on this raw path. Therefore the notification handler is registered
-    locally and the CCCD is enabled with a non-blocking ATT Write Command. Key-BLE
-    characteristic traffic can still use the protocol-correct Write Request with
-    response independently.
-    """
+            # Operations whose second/third bytes are an attribute/value handle.
+            if opcode in (0x04, 0x0A, 0x0C, 0x12, 0x1B, 0x1D, 0x52) and len(data) >= 3:
+                handle = int.from_bytes(data[1:3], "little")
+                summary += f"@0x{handle:04x}"
+            elif opcode == 0x01 and len(data) >= 5:
+                # Error Response: request opcode, handle, error code.
+                req_opcode = data[1]
+                handle = int.from_bytes(data[2:4], "little")
+                error_code = data[4]
+                summary += (
+                    f"(req=0x{req_opcode:02x},handle=0x{handle:04x},err=0x{error_code:02x})"
+                )
+
+            summary += f"[{len(data)}]"
+
+        trace = getattr(self, "_eqiva_att_trace", None)
+        if trace is None:
+            trace = []
+            self._eqiva_att_trace = trace
+        trace.append(summary)
+        del trace[:-12]
+
+    def trace_summary(self) -> str:
+        """Return recent sanitized ATT metadata for diagnostics."""
+        trace = getattr(self, "_eqiva_att_trace", None) or []
+        return " > ".join(trace) if trace else "keine ATT-PDUs aufgezeichnet"
+
+    async def _send_traced_pdu(self, data: bytes) -> None:
+        self._trace_pdu("TX", data)
+        await self._send_pdu(data)
 
     async def connect(self, pair: bool, **kwargs: Any) -> None:
         """Open raw ATT, skip MTU exchange, and discover GATT services."""
         if self._connected:
             raise BleakError("already connected")
 
+        self._eqiva_att_trace: list[str] = []
         att = ATTClient(
-            send=self._send_pdu,
+            send=self._send_traced_pdu,
             on_disconnect=self._handle_disconnect,
             escalate_security=self._escalate_security,
         )
         self._att = att
+
+        def _on_raw_data(data: bytes) -> None:
+            self._trace_pdu("RX", data)
+            att.data_received(data)
 
         _LOGGER.debug(
             "%s: opening Eqiva raw L2CAP/ATT connection with MTU fixed at 23",
@@ -55,7 +87,7 @@ class EqivaRawATTClient(HaMgmtClient):
                     source=self._adapter_address,
                     address=self.address,
                     address_type=self._address_type,
-                    on_data=att.data_received,
+                    on_data=_on_raw_data,
                     on_close=att.connection_lost,
                     timeout=self._timeout,
                     security_level=BT_SECURITY_LOW,
@@ -107,7 +139,7 @@ class EqivaRawATTClient(HaMgmtClient):
         callback: Callable[[bytearray], None],
     ) -> None:
         """Register the notification handler locally without touching the CCCD."""
-        self._notification_cccd(characteristic)  # validate before registering
+        self._notification_cccd(characteristic)
         self._codec().set_notify_handler(characteristic.handle, callback)
         _LOGGER.debug(
             "%s: Eqiva raw ATT notify handler prepared locally for handle 0x%04x",
@@ -122,9 +154,6 @@ class EqivaRawATTClient(HaMgmtClient):
         codec = self._codec()
         cccd, cccd_value = self._notification_cccd(characteristic)
         try:
-            # Eqiva drops the raw ATT link when this descriptor is sent as a
-            # Write Request. A Write Command does not create an ATT transaction
-            # and therefore lets the Key-BLE CONNECTION_REQUEST follow directly.
             await codec.write_command(cccd.handle, cccd_value)
         except BaseException:
             codec.remove_notify_handler(characteristic.handle)
