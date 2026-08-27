@@ -6,6 +6,11 @@ import os
 from typing import Any
 
 from homeassistant.components import bluetooth
+from habluetooth.central_manager import get_manager
+from habluetooth.channels.att import (
+    ATT_ERR_INSUFFICIENT_AUTHENTICATION,
+    ATTError,
+)
 from habluetooth.channels.l2cap import can_use_l2cap
 from habluetooth.client_mgmt import MgmtClientData
 from habluetooth.usage import ORIGINAL_BLEAK_CLIENT
@@ -25,7 +30,7 @@ from .protocol import (
 from .raw_att_client import EqivaRawATTClient
 
 _LOGGER = logging.getLogger(__name__)
-_RAW_MARKER = "RAW-PDU-v25"
+_RAW_MARKER = "RAW-PDU-v26"
 
 
 def _remember_stage(self: EqivaKeyBleClient, value: str) -> str:
@@ -160,6 +165,8 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
         scanner = path.scanner
         device = path.ble_device
         source = scanner.source
+        mgmt = get_manager().get_bluez_mgmt_ctl()
+        adapter_idx = scanner.adapter_idx
         stage = _remember_stage(
             self,
             f"{_RAW_MARKER}: Raw L2CAP/ATT verbinden und GATT ohne MTU-Exchange "
@@ -174,6 +181,8 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
             client_data=MgmtClientData(
                 adapter_address=source,
                 scanner=scanner,
+                adapter_idx=adapter_idx,
+                mgmt=mgmt,
             ),
         )
         self._client = client
@@ -316,36 +325,48 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
 
             self._eqiva_returned_user_id = self.user_id
 
-            # v24 proved the CCCD descriptor rejects a real Write Request with
-            # ATT error 0x05 (Insufficient Authentication). habluetooth normally
-            # raises BT_SECURITY and retries immediately, which races the async
-            # LE security procedure. v25 raises MEDIUM explicitly, waits for the
-            # kernel/SMP work to settle, and only then retries the CCCD request.
+            # ESPHome accepts ESP_GAP_BLE_SEC_REQ_EVT automatically. Reproduce
+            # that behavior on Linux: first let the protected CCCD write expose
+            # ATT 0x05, then perform a real mgmt Just-Works pairing and only
+            # retry the descriptor after the pairing command completed.
             stage = _remember_stage(
                 self,
-                f"{_RAW_MARKER}: Nonce steht; BLE-Link-Security MEDIUM anfordern und 2s stabilisieren",
+                f"{_RAW_MARKER}: Nonce steht; geschützten CCCD Write Request testen",
             )
-            await backend.request_medium_link_security(2.0)
+            try:
+                await backend.confirm_prepared_notify(receive_characteristic)
+            except ATTError as err:
+                if err.error_code != ATT_ERR_INSUFFICIENT_AUTHENTICATION:
+                    raise
+                if mgmt is None or adapter_idx is None:
+                    raise EqivaConnectionError(
+                        f"{_RAW_MARKER}: Schloss fordert ATT-Authentifizierung (0x05), aber "
+                        "der BlueZ-Management-Socket ist für diesen Adapter nicht verfügbar"
+                    ) from err
 
-            stage = _remember_stage(
-                self,
-                f"{_RAW_MARKER}: Security MEDIUM angefordert; CCCD als ATT Write Request bestätigen; "
-                f"security={backend.requested_security_level}; mtu={client.mtu_size}",
-            )
-            await backend.confirm_prepared_notify(receive_characteristic)
+                stage = _remember_stage(
+                    self,
+                    f"{_RAW_MARKER}: ATT 0x05 erkannt; BLE Just-Works-Pairing über Mgmt starten",
+                )
+                await backend.pair()
+
+                stage = _remember_stage(
+                    self,
+                    f"{_RAW_MARKER}: BLE Just-Works-Pairing abgeschlossen; CCCD Write Request wiederholen",
+                )
+                await backend.confirm_prepared_notify(receive_characteristic)
 
             _remember_stage(
                 self,
-                f"{_RAW_MARKER}: KeyBLE Nonce + BLE Security MEDIUM + CCCD bestätigt",
+                f"{_RAW_MARKER}: KeyBLE Nonce + BLE Pairing + CCCD bestätigt",
             )
             _LOGGER.debug(
-                "Eqiva %s: %s raw ATT session prepared; requested_id=%s returned_id=%s "
-                "security=%s trace=%s",
+                "Eqiva %s: %s raw ATT session prepared after mgmt pairing; "
+                "requested_id=%s returned_id=%s trace=%s",
                 self.address,
                 _RAW_MARKER,
                 _id_text(self._eqiva_requested_user_id),
                 _id_text(self._eqiva_returned_user_id),
-                backend.requested_security_level,
                 backend.trace_summary(),
             )
             return
