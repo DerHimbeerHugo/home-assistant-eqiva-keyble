@@ -12,9 +12,9 @@ from . import bluez_notify_patch as _eqiva_transport_patch  # noqa: F401
 # Add reproducible secure-frame diagnostics without changing the working raw
 # ATT transport path. This records only session nonces/frame bytes, never keys.
 from . import secure_trace_patch as _eqiva_secure_trace_patch  # noqa: F401
-# v29 leaves the failed SMP experiments disabled. It tests notify delivery first
-# without a CCCD write and, on the existing retry, with the proven Write Command,
-# while exposing the discovered receive-characteristic/descriptor layout.
+# v29 leaves the failed SMP experiments disabled. It first tests notify delivery
+# without a CCCD write and falls back on the same connection to the proven CCCD
+# Write Command after a short observation window, while exposing the GATT layout.
 from . import v29_diagnostic_patch as _eqiva_v29_diagnostic_patch  # noqa: F401
 from .const import CONF_ADDRESS, CONF_NAME, CONF_USER_ID, CONF_USER_KEY
 from .coordinator import EqivaCoordinator
