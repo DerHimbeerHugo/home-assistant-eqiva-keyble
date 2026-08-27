@@ -54,12 +54,11 @@ def _register_bluez_callback_early(self: EqivaKeyBleClient) -> bool:
 
 
 async def _eqiva_connect_primed_notify(self: EqivaKeyBleClient) -> None:
-    """Connect using the ordering used by the working ESPHome implementation.
+    """Connect using Eqiva-specific write/notify ordering.
 
-    ESPHome registers receive handling locally, immediately sends the initial
-    CONNECTION_REQUEST and only then completes remote CCCD activation. BlueZ
-    normally tries to complete CCCD activation before returning from start_notify(),
-    which this lock rejects with ATT 0x0E. Prime the Key-BLE session first.
+    The lock is known to behave unusually around MTU/GATT initialization. For this
+    hardware test, send Key-BLE fragments as ATT Write Commands (no GATT response)
+    and prime the nonce exchange before BlueZ attempts CCCD activation.
     """
     if self._client is not None and self._client.is_connected:
         return
@@ -110,65 +109,86 @@ async def _eqiva_connect_primed_notify(self: EqivaKeyBleClient) -> None:
 
             send_properties = set(self._send_characteristic.properties)
             receive_properties = set(self._receive_characteristic.properties)
-            if "write" in send_properties:
-                self._write_with_response = True
-            elif "write-without-response" in send_properties:
-                self._write_with_response = False
-            else:
+            if not ({"write", "write-without-response"} & send_properties):
                 raise EqivaConnectionError(
                     "Eqiva Send-Characteristic ist nicht beschreibbar: "
                     f"{sorted(send_properties)}"
                 )
-
             if not ({"notify", "indicate"} & receive_properties):
                 raise EqivaConnectionError(
                     "Eqiva Receive-Characteristic unterstützt keine Notifications: "
                     f"{sorted(receive_properties)}"
                 )
 
-            # Mirror the ESPHome ordering: local receive handling first, then
-            # CONNECTION_REQUEST before the remote CCCD is enabled.
+            # BlueZ accepts an explicitly requested Write Command even when the
+            # characteristic only advertises the normal WRITE property. This avoids
+            # waiting for the Eqiva's problematic ATT Write Response during this test.
+            self._write_with_response = False
+            _LOGGER.debug(
+                "Eqiva %s: forcing ATT Write Command (response=False); send properties=%s",
+                self.address,
+                sorted(send_properties),
+            )
+
             _register_bluez_callback_early(self)
             self._local_nonce = os.urandom(8)
             waiter = self._new_waiter(MSG_CONNECTION_INFO)
 
-            stage = "CONNECTION_REQUEST vor Notify-Aktivierung senden"
-            _LOGGER.debug(
-                "Eqiva %s: priming Key-BLE session with CONNECTION_REQUEST before CCCD",
-                self.address,
-            )
+            stage = "CONNECTION_REQUEST als Write Command senden"
             await self._send_message(
                 MSG_CONNECTION_REQUEST,
                 bytes([self.user_id]) + self._local_nonce,
                 secure=False,
             )
+            _LOGGER.debug(
+                "Eqiva %s: CONNECTION_REQUEST Write Command submitted",
+                self.address,
+            )
 
-            # StartNotify is closest to ESPHome's explicit CCCD write. Keep
-            # AcquireNotify as a second clean-connection fallback.
             use_acquire_notify = attempt == 2
             notify_mode = "AcquireNotify" if use_acquire_notify else "StartNotify"
-            stage = f"Notifications aktivieren ({notify_mode}) nach CONNECTION_REQUEST"
+            stage = f"Notifications aktivieren ({notify_mode}) nach Write Command"
             kwargs = (
                 {"bluez": {"use_start_notify": False}}
                 if use_acquire_notify
                 else {}
             )
-            await self._client.start_notify(
-                self._receive_characteristic,
-                self._notification_callback,
-                **kwargs,
-            )
 
-            stage = "CONNECTION_INFO nach Notify-Aktivierung empfangen"
+            notify_error: Exception | None = None
             try:
-                await asyncio.wait_for(asyncio.shield(waiter), timeout=1.0)
-            except asyncio.TimeoutError:
-                # The priming response may have been emitted before the CCCD became
-                # active. Repeat the same request once now that notifications are on.
-                _LOGGER.debug(
-                    "Eqiva %s: no CONNECTION_INFO after priming; repeating CONNECTION_REQUEST",
-                    self.address,
+                await self._client.start_notify(
+                    self._receive_characteristic,
+                    self._notification_callback,
+                    **kwargs,
                 )
+                _LOGGER.debug(
+                    "Eqiva %s: notifications enabled via %s",
+                    self.address,
+                    notify_mode,
+                )
+            except Exception as err:  # noqa: BLE001
+                notify_error = err
+                _LOGGER.warning(
+                    "Eqiva %s: %s returned an error after Write Command: %s: %s; waiting briefly for CONNECTION_INFO anyway",
+                    self.address,
+                    notify_mode,
+                    type(err).__name__,
+                    err,
+                )
+
+            stage = f"CONNECTION_INFO nach Write Command/{notify_mode} empfangen"
+            try:
+                await asyncio.wait_for(asyncio.shield(waiter), timeout=1.5)
+            except asyncio.TimeoutError:
+                if notify_error is not None:
+                    raise EqivaConnectionError(
+                        f"Write Command wurde ohne lokalen GATT-Fehler gesendet, aber {notify_mode} "
+                        f"scheiterte ({type(notify_error).__name__}: {notify_error}) und es kam keine "
+                        "CONNECTION_INFO-Antwort"
+                    ) from notify_error
+
+                # Notifications are active, so repeat the nonce request once to avoid
+                # losing a very fast response that may have arrived before CCCD enable.
                 await self._send_message(
                     MSG_CONNECTION_REQUEST,
                     bytes([self.user_id]) + self._local_nonce,
@@ -178,13 +198,14 @@ async def _eqiva_connect_primed_notify(self: EqivaKeyBleClient) -> None:
 
             if self._remote_nonce is None:
                 raise EqivaHandshakeError(
-                    "Notify ist aktiv, aber das Schloss hat keine CONNECTION_INFO-Nonce geliefert"
+                    "Das Schloss hat keine CONNECTION_INFO-Nonce geliefert"
                 )
 
             _LOGGER.debug(
-                "Eqiva %s: notifications and nonce handshake established via %s",
+                "Eqiva %s: nonce handshake established; notify_mode=%s notify_error=%s",
                 self.address,
                 notify_mode,
+                notify_error,
             )
             return
 
@@ -201,7 +222,7 @@ async def _eqiva_connect_primed_notify(self: EqivaKeyBleClient) -> None:
             await self._clear_stale_connection()
             if attempt == 1:
                 _LOGGER.warning(
-                    "Eqiva %s: primed StartNotify path failed (%s); retrying with AcquireNotify",
+                    "Eqiva %s: Write Command/StartNotify path failed (%s); retrying with AcquireNotify",
                     self.address,
                     errors[-1],
                 )
