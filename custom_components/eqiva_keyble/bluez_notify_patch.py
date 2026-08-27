@@ -22,6 +22,7 @@ from .protocol import (
 from .raw_att_client import EqivaRawATTClient
 
 _LOGGER = logging.getLogger(__name__)
+_RAW_MARKER = "RAW-PDU-v15"
 
 
 def _local_raw_path(self: EqivaKeyBleClient):
@@ -91,11 +92,12 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
         scanner = path.scanner
         device = path.ble_device
         source = scanner.source
-        stage = f"Raw L2CAP/ATT verbinden und GATT ohne MTU-Exchange auflösen (Versuch {attempt}/2)"
+        stage = f"{_RAW_MARKER}: Raw L2CAP/ATT verbinden und GATT ohne MTU-Exchange auflösen (Versuch {attempt}/2)"
 
         _LOGGER.debug(
-            "Eqiva %s: raw ATT attempt %s via %s / %s (RSSI %s)",
+            "Eqiva %s: %s raw ATT attempt %s via %s / %s (RSSI %s)",
             self.address,
+            _RAW_MARKER,
             attempt,
             scanner.adapter,
             source,
@@ -115,9 +117,21 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
         self._client = client
 
         try:
+            backend = getattr(client, "_backend", None)
+            backend_name = (
+                f"{type(backend).__module__}.{type(backend).__name__}"
+                if backend is not None
+                else "None"
+            )
+            if type(backend) is not EqivaRawATTClient:
+                raise EqivaConnectionError(
+                    f"{_RAW_MARKER}: unerwartetes Bleak-Backend {backend_name}; "
+                    "EqivaRawATTClient wurde nicht geladen"
+                )
+
             await client.connect()
 
-            stage = "Raw ATT GATT-Characteristics auflösen"
+            stage = f"{_RAW_MARKER}: Raw ATT GATT-Characteristics auflösen; backend={backend_name}"
             services = client.services
             self._send_characteristic = services.get_characteristic(
                 SEND_CHARACTERISTIC_UUID
@@ -147,42 +161,55 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
                     f"{sorted(receive_properties)}"
                 )
 
-            # Eqiva does not reliably answer ATT write requests. The raw backend
-            # therefore uses Write Commands for both Key-BLE fragments and CCCD.
             self._write_with_response = False
 
-            stage = "Raw ATT Notifications/CCCD als Write Command aktivieren"
-            await client.start_notify(
-                self._receive_characteristic,
-                self._notification_callback,
+            stage = (
+                f"{_RAW_MARKER}: direkten EqivaRawATTClient CCCD Write Command ausführen; "
+                f"backend={backend_name}"
+            )
+
+            # Deliberately bypass BleakClient.start_notify(). This proves that the
+            # exact custom backend method is the code path executing at runtime.
+            # Backend callbacks receive only the notification payload, so adapt it
+            # to EqivaKeyBleClient's characteristic+payload callback signature.
+            receive_characteristic = self._receive_characteristic
+
+            def _raw_notify_callback(data: bytearray) -> None:
+                current = self._receive_characteristic or receive_characteristic
+                self._notification_callback(current, data)
+
+            await backend.start_notify(
+                receive_characteristic,
+                _raw_notify_callback,
             )
 
             self._local_nonce = os.urandom(8)
             waiter = self._new_waiter(MSG_CONNECTION_INFO)
-            stage = "KeyBLE CONNECTION_REQUEST über raw ATT senden"
+            stage = f"{_RAW_MARKER}: KeyBLE CONNECTION_REQUEST über raw ATT senden"
             await self._send_message(
                 MSG_CONNECTION_REQUEST,
                 bytes([self.user_id]) + self._local_nonce,
                 secure=False,
             )
 
-            stage = "KeyBLE CONNECTION_INFO über raw ATT empfangen"
+            stage = f"{_RAW_MARKER}: KeyBLE CONNECTION_INFO über raw ATT empfangen"
             try:
                 await asyncio.wait_for(waiter, timeout=5.0)
             except asyncio.TimeoutError as err:
                 raise EqivaHandshakeError(
-                    "Raw ATT steht, aber das Schloss hat innerhalb von 5 Sekunden keine "
-                    "CONNECTION_INFO-Nonce geliefert."
+                    f"{_RAW_MARKER}: Raw ATT steht, aber das Schloss hat innerhalb von 5 Sekunden "
+                    "keine CONNECTION_INFO-Nonce geliefert."
                 ) from err
 
             if self._remote_nonce is None:
                 raise EqivaHandshakeError(
-                    "Raw ATT steht, aber das Schloss hat keine CONNECTION_INFO-Nonce geliefert."
+                    f"{_RAW_MARKER}: Raw ATT steht, aber das Schloss hat keine CONNECTION_INFO-Nonce geliefert."
                 )
 
             _LOGGER.debug(
-                "Eqiva %s: raw ATT + KeyBLE nonce handshake established at MTU %s",
+                "Eqiva %s: %s raw ATT + KeyBLE nonce handshake established at MTU %s",
                 self.address,
+                _RAW_MARKER,
                 client.mtu_size,
             )
             return
@@ -212,7 +239,7 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
             ) from err
 
     raise EqivaConnectionError(
-        "Raw L2CAP/ATT-Verbindungsaufbau nach zwei Versuchen fehlgeschlagen: "
+        f"{_RAW_MARKER}: Raw L2CAP/ATT-Verbindungsaufbau nach zwei Versuchen fehlgeschlagen: "
         f"{last_error}"
     )
 
@@ -224,7 +251,7 @@ async def _eqiva_ensure_nonces_exchanged(self: EqivaKeyBleClient) -> None:
     await self._connect()
     if self._remote_nonce is None or self._local_nonce is None:
         raise EqivaHandshakeError(
-            "Raw ATT steht, aber der KeyBLE-Nonce-Handshake wurde nicht abgeschlossen"
+            f"{_RAW_MARKER}: Raw ATT steht, aber der KeyBLE-Nonce-Handshake wurde nicht abgeschlossen"
         )
 
 
