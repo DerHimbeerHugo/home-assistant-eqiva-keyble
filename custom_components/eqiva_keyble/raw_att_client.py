@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from bleak import BleakError
 from bleak.backends.characteristic import BleakGATTCharacteristic
@@ -21,14 +21,16 @@ class EqivaRawATTClient(HaMgmtClient):
     """Eqiva-specific raw L2CAP/ATT backend.
 
     Eqiva Key-BLE locks are known to misbehave when the central performs an ATT
-    Exchange MTU during connection setup. The experimental habluetooth mgmt
-    backend normally performs that exchange before GATT discovery. This backend
-    deliberately leaves ATT at the Bluetooth default MTU of 23 and talks to the
-    lock directly over the kernel L2CAP ATT fixed channel.
+    Exchange MTU during connection setup. This backend deliberately leaves ATT at
+    the Bluetooth default MTU of 23 and talks to the lock directly over the kernel
+    L2CAP ATT fixed channel.
 
-    Once MTU exchange is skipped, use normal ATT Write Requests for the CCCD and
-    Key-BLE characteristic writes. This matches the working ESP-IDF implementation,
-    which writes Key-BLE fragments with ESP_GATT_WRITE_TYPE_RSP.
+    The lock is also timing-sensitive during notification setup. The working
+    ESP-IDF implementation first registers its notification callback locally,
+    immediately starts the Key-BLE nonce request, and only afterwards performs
+    the CCCD write from the asynchronous notify-registration event. To reproduce
+    that ordering, notification preparation and remote CCCD enabling are split
+    into two explicit operations here.
     """
 
     async def connect(self, pair: bool, **kwargs: Any) -> None:
@@ -36,8 +38,6 @@ class EqivaRawATTClient(HaMgmtClient):
         if self._connected:
             raise BleakError("already connected")
 
-        # Eqiva uses application-level Key-BLE authentication, not Bluetooth
-        # pairing/bonding, so the raw link intentionally starts at LOW security.
         att = ATTClient(
             send=self._send_pdu,
             on_disconnect=self._handle_disconnect,
@@ -62,9 +62,7 @@ class EqivaRawATTClient(HaMgmtClient):
                     security_level=BT_SECURITY_LOW,
                 )
 
-                # IMPORTANT: do not call att.exchange_mtu(). Eqiva works with
-                # the default ATT MTU (23) but can become unusable after a normal
-                # Exchange MTU request.
+                # IMPORTANT: never call att.exchange_mtu() for this lock.
                 services = await att.discover()
         except BaseException:
             self._handle_disconnect(None)
@@ -88,14 +86,10 @@ class EqivaRawATTClient(HaMgmtClient):
             self.mtu_size,
         )
 
-    async def start_notify(
-        self,
-        characteristic: BleakGATTCharacteristic,
-        callback,
-        **kwargs: Any,
-    ) -> None:
-        """Enable notifications with a normal ATT CCCD Write Request."""
-        codec = self._codec()
+    def _notification_cccd(
+        self, characteristic: BleakGATTCharacteristic
+    ) -> tuple[BleakGATTDescriptor, bytes]:
+        """Resolve the CCCD and value for a notify/indicate characteristic."""
         if "notify" in characteristic.properties:
             cccd_value = _CCCD_NOTIFY
         elif "indicate" in characteristic.properties:
@@ -106,12 +100,28 @@ class EqivaRawATTClient(HaMgmtClient):
         cccd = characteristic.get_descriptor(CCCD_UUID)
         if cccd is None:
             raise BleakError("characteristic has no client configuration descriptor")
+        return cccd, cccd_value
 
-        # Register locally before enabling the CCCD so a very fast notification
-        # cannot race past the callback. The on-air operation is a standard ATT
-        # Write Request/Response, matching the ESP GATT stack once MTU exchange is
-        # removed from the connection sequence.
-        codec.set_notify_handler(characteristic.handle, callback)
+    def prepare_notify(
+        self,
+        characteristic: BleakGATTCharacteristic,
+        callback: Callable[[bytearray], None],
+    ) -> None:
+        """Register the notification handler locally without touching the CCCD."""
+        self._notification_cccd(characteristic)  # validate before registering
+        self._codec().set_notify_handler(characteristic.handle, callback)
+        _LOGGER.debug(
+            "%s: Eqiva raw ATT notify handler prepared locally for handle 0x%04x",
+            self.address,
+            characteristic.handle,
+        )
+
+    async def enable_prepared_notify(
+        self, characteristic: BleakGATTCharacteristic
+    ) -> None:
+        """Enable a previously prepared notification using an ATT Write Request."""
+        codec = self._codec()
+        cccd, cccd_value = self._notification_cccd(characteristic)
         try:
             await codec.write(cccd.handle, cccd_value)
         except BaseException:
@@ -119,11 +129,20 @@ class EqivaRawATTClient(HaMgmtClient):
             raise
 
         _LOGGER.debug(
-            "%s: Eqiva raw ATT notifications enabled via CCCD Write Request "
-            "(handle 0x%04x)",
+            "%s: Eqiva raw ATT CCCD enabled after nonce write (handle 0x%04x)",
             self.address,
             cccd.handle,
         )
+
+    async def start_notify(
+        self,
+        characteristic: BleakGATTCharacteristic,
+        callback,
+        **kwargs: Any,
+    ) -> None:
+        """Standard combined helper retained for Bleak compatibility."""
+        self.prepare_notify(characteristic, callback)
+        await self.enable_prepared_notify(characteristic)
 
     async def stop_notify(self, characteristic: BleakGATTCharacteristic) -> None:
         """Disable notifications with a normal ATT CCCD Write Request."""
