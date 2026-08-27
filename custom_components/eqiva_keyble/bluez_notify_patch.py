@@ -25,7 +25,7 @@ from .protocol import (
 from .raw_att_client import EqivaRawATTClient
 
 _LOGGER = logging.getLogger(__name__)
-_RAW_MARKER = "RAW-PDU-v24"
+_RAW_MARKER = "RAW-PDU-v25"
 
 
 def _remember_stage(self: EqivaKeyBleClient, value: str) -> str:
@@ -316,28 +316,36 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
 
             self._eqiva_returned_user_id = self.user_id
 
-            # ESPHome does not only register the local notify callback: its base
-            # GATT client also sends a normal CCCD descriptor Write Request. Our
-            # early request variants were too early for this lock, so v24 keeps
-            # the working Write Command for the nonce exchange and repeats the
-            # same CCCD value as a real Write Request only after CONNECTION_INFO.
+            # v24 proved the CCCD descriptor rejects a real Write Request with
+            # ATT error 0x05 (Insufficient Authentication). habluetooth normally
+            # raises BT_SECURITY and retries immediately, which races the async
+            # LE security procedure. v25 raises MEDIUM explicitly, waits for the
+            # kernel/SMP work to settle, and only then retries the CCCD request.
             stage = _remember_stage(
                 self,
-                f"{_RAW_MARKER}: Nonce steht; CCCD jetzt als ATT Write Request bestätigen; "
-                f"mtu={client.mtu_size}",
+                f"{_RAW_MARKER}: Nonce steht; BLE-Link-Security MEDIUM anfordern und 2s stabilisieren",
+            )
+            await backend.request_medium_link_security(2.0)
+
+            stage = _remember_stage(
+                self,
+                f"{_RAW_MARKER}: Security MEDIUM angefordert; CCCD als ATT Write Request bestätigen; "
+                f"security={backend.requested_security_level}; mtu={client.mtu_size}",
             )
             await backend.confirm_prepared_notify(receive_characteristic)
 
             _remember_stage(
                 self,
-                f"{_RAW_MARKER}: KeyBLE Nonce-Handshake + CCCD Write Request bestätigt",
+                f"{_RAW_MARKER}: KeyBLE Nonce + BLE Security MEDIUM + CCCD bestätigt",
             )
             _LOGGER.debug(
-                "Eqiva %s: %s raw ATT session prepared; requested_id=%s returned_id=%s trace=%s",
+                "Eqiva %s: %s raw ATT session prepared; requested_id=%s returned_id=%s "
+                "security=%s trace=%s",
                 self.address,
                 _RAW_MARKER,
                 _id_text(self._eqiva_requested_user_id),
                 _id_text(self._eqiva_returned_user_id),
+                backend.requested_security_level,
                 backend.trace_summary(),
             )
             return
