@@ -25,7 +25,7 @@ from .protocol import (
 from .raw_att_client import EqivaRawATTClient
 
 _LOGGER = logging.getLogger(__name__)
-_RAW_MARKER = "RAW-PDU-v22"
+_RAW_MARKER = "RAW-PDU-v24"
 
 
 def _remember_stage(self: EqivaKeyBleClient, value: str) -> str:
@@ -57,7 +57,6 @@ def _answer_code_text(value: Any) -> str:
 
 
 def _local_raw_path(self: EqivaKeyBleClient):
-    """Return the best local hci scanner path for the lock."""
     paths = bluetooth.async_scanner_devices_by_address(
         self.hass, self.address, connectable=True
     )
@@ -80,7 +79,6 @@ def _local_raw_path(self: EqivaKeyBleClient):
 
 
 def _eqiva_on_disconnect(self: EqivaKeyBleClient, disconnected_client: Any) -> None:
-    """Preserve raw ATT diagnostics and tolerate a fully processed STATUS_INFO."""
     stage = getattr(self, "_eqiva_raw_stage", f"{_RAW_MARKER}: Stage unbekannt")
     client = disconnected_client or self._client
     trace = _trace_summary(client)
@@ -112,10 +110,6 @@ def _eqiva_on_disconnect(self: EqivaKeyBleClient, disconnected_client: Any) -> N
     self._reset_session()
 
     if status_ok and MSG_STATUS_INFO not in pending and self.last_status is not None:
-        _LOGGER.debug(
-            "Eqiva %s: accepting remote disconnect after fully processed STATUS_INFO",
-            self.address,
-        )
         return
 
     self._fail_waiters(
@@ -130,7 +124,6 @@ def _eqiva_on_disconnect(self: EqivaKeyBleClient, disconnected_client: Any) -> N
 
 
 async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
-    """Connect to Eqiva over raw L2CAP/ATT, bypassing bluetoothd GATT/MTU."""
     if self._client is not None and self._client.is_connected:
         return
 
@@ -171,16 +164,6 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
             self,
             f"{_RAW_MARKER}: Raw L2CAP/ATT verbinden und GATT ohne MTU-Exchange "
             f"auflösen (Versuch {attempt}/2)",
-        )
-
-        _LOGGER.debug(
-            "Eqiva %s: %s raw ATT attempt %s via %s / %s (RSSI %s)",
-            self.address,
-            _RAW_MARKER,
-            attempt,
-            scanner.adapter,
-            source,
-            path.advertisement.rssi,
         )
 
         client = ORIGINAL_BLEAK_CLIENT(
@@ -280,9 +263,7 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
                             f"{_RAW_MARKER}: Schloss antwortete auf den sicheren KeyBLE-Request mit "
                             f"ANSWER_WITHOUT_SECURITY (Antwortbyte={_answer_code_text(answer_code)}). "
                             f"Angeforderte User-ID={_id_text(requested_id)}, vom Schloss in CONNECTION_INFO "
-                            f"zurückgemeldete User-ID={_id_text(returned_id)}. Der BLE-/Nonce-Handshake ist "
-                            "erfolgreich; abgelehnt wird erst die authentifizierte Nachricht. "
-                            "Prüfe daher User-ID/User-Key bzw. die sichere KeyBLE-Nachrichtenerzeugung."
+                            f"zurückgemeldete User-ID={_id_text(returned_id)}."
                         )
                     )
 
@@ -334,13 +315,27 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
                 )
 
             self._eqiva_returned_user_id = self.user_id
-            _remember_stage(self, f"{_RAW_MARKER}: KeyBLE Nonce-Handshake abgeschlossen")
+
+            # ESPHome does not only register the local notify callback: its base
+            # GATT client also sends a normal CCCD descriptor Write Request. Our
+            # early request variants were too early for this lock, so v24 keeps
+            # the working Write Command for the nonce exchange and repeats the
+            # same CCCD value as a real Write Request only after CONNECTION_INFO.
+            stage = _remember_stage(
+                self,
+                f"{_RAW_MARKER}: Nonce steht; CCCD jetzt als ATT Write Request bestätigen; "
+                f"mtu={client.mtu_size}",
+            )
+            await backend.confirm_prepared_notify(receive_characteristic)
+
+            _remember_stage(
+                self,
+                f"{_RAW_MARKER}: KeyBLE Nonce-Handshake + CCCD Write Request bestätigt",
+            )
             _LOGGER.debug(
-                "Eqiva %s: %s raw ATT + KeyBLE nonce handshake established at MTU %s; "
-                "requested_id=%s returned_id=%s trace=%s",
+                "Eqiva %s: %s raw ATT session prepared; requested_id=%s returned_id=%s trace=%s",
                 self.address,
                 _RAW_MARKER,
-                client.mtu_size,
                 _id_text(self._eqiva_requested_user_id),
                 _id_text(self._eqiva_returned_user_id),
                 backend.trace_summary(),
@@ -380,7 +375,6 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
 
 
 async def _eqiva_ensure_nonces_exchanged(self: EqivaKeyBleClient) -> None:
-    """The raw connect path already performs the nonce exchange."""
     if self._remote_nonce is not None and self._local_nonce is not None:
         return
     await self._connect()
