@@ -17,6 +17,7 @@ from .protocol import (
     EqivaKeyBleClient,
     EqivaNotFoundError,
     EqivaProtocolError,
+    MSG_ANSWER_WITHOUT_SECURITY,
     MSG_CONNECTION_INFO,
     MSG_CONNECTION_REQUEST,
     MSG_STATUS_INFO,
@@ -24,7 +25,7 @@ from .protocol import (
 from .raw_att_client import EqivaRawATTClient
 
 _LOGGER = logging.getLogger(__name__)
-_RAW_MARKER = "RAW-PDU-v21"
+_RAW_MARKER = "RAW-PDU-v22"
 
 
 def _remember_stage(self: EqivaKeyBleClient, value: str) -> str:
@@ -45,6 +46,14 @@ def _pending_waiter_types(self: EqivaKeyBleClient) -> list[int]:
         for message_type, waiters in self._waiters.items()
         if any(not future.done() for future in waiters)
     )
+
+
+def _id_text(value: Any) -> str:
+    return str(value) if isinstance(value, int) else "unbekannt"
+
+
+def _answer_code_text(value: Any) -> str:
+    return f"0x{value:02x}" if isinstance(value, int) else "unbekannt"
 
 
 def _local_raw_path(self: EqivaKeyBleClient):
@@ -78,16 +87,23 @@ def _eqiva_on_disconnect(self: EqivaKeyBleClient, disconnected_client: Any) -> N
     pending = _pending_waiter_types(self)
     last_rx = getattr(self, "_eqiva_last_rx_message_type", None)
     status_ok = bool(getattr(self, "_eqiva_status_info_ok", False))
+    answer_code = getattr(self, "_eqiva_answer_without_security", None)
+    requested_id = getattr(self, "_eqiva_requested_user_id", None)
+    returned_id = getattr(self, "_eqiva_returned_user_id", None)
     last_rx_text = f"0x{last_rx:02x}" if isinstance(last_rx, int) else "none"
     pending_text = ",".join(f"0x{value:02x}" for value in pending) or "none"
 
     _LOGGER.warning(
-        "Eqiva %s disconnected during %s; last_rx=%s status_ok=%s pending=%s; sanitized ATT trace: %s",
+        "Eqiva %s disconnected during %s; last_rx=%s status_ok=%s pending=%s "
+        "answer_code=%s requested_id=%s returned_id=%s; sanitized ATT trace: %s",
         self.address,
         stage,
         last_rx_text,
         status_ok,
         pending_text,
+        _answer_code_text(answer_code),
+        _id_text(requested_id),
+        _id_text(returned_id),
         trace,
     )
 
@@ -95,10 +111,6 @@ def _eqiva_on_disconnect(self: EqivaKeyBleClient, disconnected_client: Any) -> N
     self._reset_gatt()
     self._reset_session()
 
-    # Eqiva may close the BLE link immediately after delivering STATUS_INFO.
-    # ATT notification dispatch is synchronous, so if last_status is already set
-    # and the STATUS_INFO waiter has been removed, the operation succeeded and
-    # the following physical disconnect must not overwrite that result.
     if status_ok and MSG_STATUS_INFO not in pending and self.last_status is not None:
         _LOGGER.debug(
             "Eqiva %s: accepting remote disconnect after fully processed STATUS_INFO",
@@ -110,6 +122,8 @@ def _eqiva_on_disconnect(self: EqivaKeyBleClient, disconnected_client: Any) -> N
         EqivaConnectionError(
             f"{_RAW_MARKER}: Bluetooth-Verbindung getrennt während: {stage}; "
             f"last_rx={last_rx_text}; status_ok={status_ok}; pending={pending_text}; "
+            f"answer_code={_answer_code_text(answer_code)}; "
+            f"requested_id={_id_text(requested_id)}; returned_id={_id_text(returned_id)}; "
             f"ATT-Spur: {trace}"
         )
     )
@@ -124,6 +138,9 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
     self._reset_gatt()
     self._eqiva_last_rx_message_type = None
     self._eqiva_status_info_ok = False
+    self._eqiva_answer_without_security = None
+    self._eqiva_requested_user_id = None
+    self._eqiva_returned_user_id = None
 
     if not can_use_l2cap():
         raise EqivaConnectionError(
@@ -228,10 +245,7 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
                     f"{sorted(receive_properties)}"
                 )
 
-            # Keep the working v19/v20 transport: CCCD as Write Command and
-            # Key-BLE message fragments as protocol-correct Write Requests.
             self._write_with_response = True
-
             receive_characteristic = self._receive_characteristic
 
             def _raw_notify_callback(data: bytearray) -> None:
@@ -239,6 +253,8 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
                 if len(data) >= 2 and (data[0] & 0x80):
                     message_type = data[1]
                     self._eqiva_last_rx_message_type = message_type
+                    if message_type == MSG_ANSWER_WITHOUT_SECURITY:
+                        self._eqiva_answer_without_security = data[2] if len(data) >= 3 else None
 
                 current = self._receive_characteristic or receive_characteristic
                 self._notification_callback(current, data)
@@ -248,6 +264,26 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
                     _remember_stage(
                         self,
                         f"{_RAW_MARKER}: STATUS_INFO erfolgreich authentifiziert und verarbeitet",
+                    )
+                    return
+
+                if message_type == MSG_ANSWER_WITHOUT_SECURITY:
+                    requested_id = getattr(self, "_eqiva_requested_user_id", None)
+                    returned_id = getattr(self, "_eqiva_returned_user_id", None)
+                    answer_code = getattr(self, "_eqiva_answer_without_security", None)
+                    _remember_stage(
+                        self,
+                        f"{_RAW_MARKER}: Schloss hat sicheren Request mit ANSWER_WITHOUT_SECURITY abgelehnt",
+                    )
+                    self._fail_waiters(
+                        EqivaProtocolError(
+                            f"{_RAW_MARKER}: Schloss antwortete auf den sicheren KeyBLE-Request mit "
+                            f"ANSWER_WITHOUT_SECURITY (Antwortbyte={_answer_code_text(answer_code)}). "
+                            f"Angeforderte User-ID={_id_text(requested_id)}, vom Schloss in CONNECTION_INFO "
+                            f"zurückgemeldete User-ID={_id_text(returned_id)}. Der BLE-/Nonce-Handshake ist "
+                            "erfolgreich; abgelehnt wird erst die authentifizierte Nachricht. "
+                            "Prüfe daher User-ID/User-Key bzw. die sichere KeyBLE-Nachrichtenerzeugung."
+                        )
                     )
 
             stage = _remember_stage(
@@ -264,6 +300,7 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
             )
             await backend.enable_prepared_notify(receive_characteristic)
 
+            self._eqiva_requested_user_id = self.user_id
             self._local_nonce = os.urandom(8)
             waiter = self._new_waiter(MSG_CONNECTION_INFO)
             stage = _remember_stage(
@@ -296,12 +333,16 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
                     f"geliefert. ATT-Spur: {backend.trace_summary()}"
                 )
 
+            self._eqiva_returned_user_id = self.user_id
             _remember_stage(self, f"{_RAW_MARKER}: KeyBLE Nonce-Handshake abgeschlossen")
             _LOGGER.debug(
-                "Eqiva %s: %s raw ATT + KeyBLE nonce handshake established at MTU %s; trace=%s",
+                "Eqiva %s: %s raw ATT + KeyBLE nonce handshake established at MTU %s; "
+                "requested_id=%s returned_id=%s trace=%s",
                 self.address,
                 _RAW_MARKER,
                 client.mtu_size,
+                _id_text(self._eqiva_requested_user_id),
+                _id_text(self._eqiva_returned_user_id),
                 backend.trace_summary(),
             )
             return
