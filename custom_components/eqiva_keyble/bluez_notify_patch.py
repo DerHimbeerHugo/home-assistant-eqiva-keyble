@@ -23,7 +23,7 @@ from .protocol import (
 from .raw_att_client import EqivaRawATTClient
 
 _LOGGER = logging.getLogger(__name__)
-_RAW_MARKER = "RAW-PDU-v17"
+_RAW_MARKER = "RAW-PDU-v18"
 
 
 def _local_raw_path(self: EqivaKeyBleClient):
@@ -108,9 +108,6 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
             path.advertisement.rssi,
         )
 
-        # Home Assistant monkey-patches bleak.BleakClient to HaBleakClientWrapper.
-        # For this Eqiva-specific path use the original BleakClient saved by
-        # habluetooth so EqivaRawATTClient is instantiated directly.
         client = ORIGINAL_BLEAK_CLIENT(
             device,
             disconnected_callback=self._on_disconnect,
@@ -171,16 +168,9 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
                     f"{sorted(receive_properties)}"
                 )
 
-            # The working ESP-IDF implementation writes Key-BLE fragments with
-            # ESP_GATT_WRITE_TYPE_RSP. The earlier response=False path was only a
-            # workaround for BlueZ after its problematic MTU exchange. On raw ATT
-            # with MTU fixed at 23, use the protocol-correct Write Request again.
+            # Match the working ESP-IDF transport: Key-BLE characteristic writes
+            # are ATT Write Requests with responses. MTU stays fixed at 23.
             self._write_with_response = True
-
-            stage = (
-                f"{_RAW_MARKER}: CCCD als ATT Write Request aktivieren; "
-                f"backend={backend_name}; mtu={client.mtu_size}"
-            )
 
             receive_characteristic = self._receive_characteristic
 
@@ -188,15 +178,20 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
                 current = self._receive_characteristic or receive_characteristic
                 self._notification_callback(current, data)
 
-            await backend.start_notify(
-                receive_characteristic,
-                _raw_notify_callback,
+            # ESP-IDF first calls esp_ble_gattc_register_for_notify(), which is a
+            # local registration step. It then immediately calls init()/sendNonce().
+            # The actual CCCD write follows later from the asynchronous notify
+            # registration event. Reproduce that ordering explicitly.
+            stage = (
+                f"{_RAW_MARKER}: Notify-Handler lokal vorbereiten; "
+                f"backend={backend_name}; mtu={client.mtu_size}"
             )
+            backend.prepare_notify(receive_characteristic, _raw_notify_callback)
 
             self._local_nonce = os.urandom(8)
             waiter = self._new_waiter(MSG_CONNECTION_INFO)
             stage = (
-                f"{_RAW_MARKER}: KeyBLE CONNECTION_REQUEST als ATT Write Request senden; "
+                f"{_RAW_MARKER}: CONNECTION_REQUEST VOR CCCD als ATT Write Request senden; "
                 f"user_id={self.user_id}; mtu={client.mtu_size}"
             )
             await self._send_message(
@@ -205,12 +200,18 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
                 secure=False,
             )
 
+            stage = (
+                f"{_RAW_MARKER}: CCCD NACH CONNECTION_REQUEST als ATT Write Request aktivieren; "
+                f"backend={backend_name}; mtu={client.mtu_size}"
+            )
+            await backend.enable_prepared_notify(receive_characteristic)
+
             stage = f"{_RAW_MARKER}: KeyBLE CONNECTION_INFO über raw ATT empfangen"
             try:
                 await asyncio.wait_for(waiter, timeout=5.0)
             except asyncio.TimeoutError as err:
                 raise EqivaHandshakeError(
-                    f"{_RAW_MARKER}: CCCD und CONNECTION_REQUEST wurden als ATT Write Requests "
+                    f"{_RAW_MARKER}: CONNECTION_REQUEST und anschließender CCCD-Write wurden "
                     "bestätigt, aber das Schloss hat innerhalb von 5 Sekunden keine "
                     "CONNECTION_INFO-Nonce geliefert."
                 ) from err
@@ -269,8 +270,6 @@ async def _eqiva_ensure_nonces_exchanged(self: EqivaKeyBleClient) -> None:
         )
 
 
-# Temporary compatibility patch while the raw ATT path is validated on real
-# hardware. Once stable, fold this into protocol.py and remove the old BlueZ path.
 EqivaKeyBleClient._on_disconnect = _eqiva_on_disconnect
 EqivaKeyBleClient._connect = _eqiva_connect_raw_att
 EqivaKeyBleClient._ensure_nonces_exchanged = _eqiva_ensure_nonces_exchanged
