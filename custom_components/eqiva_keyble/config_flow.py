@@ -54,8 +54,15 @@ def _eqiva_discoveries(hass) -> list:
     ]
 
 
+def _current_connection_paths(hass, address: str) -> list:
+    """Return current connectable scanner paths for the lock."""
+    return bluetooth.async_scanner_devices_by_address(
+        hass, address, connectable=True
+    )
+
+
 async def _async_ensure_lock_seen(hass, address: str) -> None:
-    """Wait for Home Assistant to actually see the lock before connecting."""
+    """Ensure Home Assistant has a current connection path to the lock."""
     scanner_count = bluetooth.async_scanner_count(hass, connectable=True)
     _LOGGER.debug(
         "Eqiva discovery: %s connectable Home Assistant Bluetooth scanner(s)",
@@ -66,23 +73,50 @@ async def _async_ensure_lock_seen(hass, address: str) -> None:
             "Home Assistant hat keinen connectable Bluetooth-Adapter oder Bluetooth-Proxy"
         )
 
-    if bluetooth.async_ble_device_from_address(hass, address, connectable=True) is not None:
-        _LOGGER.debug("Eqiva %s: already present in Home Assistant Bluetooth cache", address)
+    current_paths = _current_connection_paths(hass, address)
+    if current_paths:
+        _LOGGER.debug(
+            "Eqiva %s: %s current connectable scanner path(s) available",
+            address,
+            len(current_paths),
+        )
         return
 
+    # async_ble_device_from_address() reads Home Assistant's connection history.
+    # A device may still be present there even after the local scanner's current
+    # cache no longer contains a usable connection path. HaBleakClientWrapper
+    # deliberately connects through async_scanner_devices_by_address(), so a
+    # history hit alone is not enough.
+    in_history = (
+        bluetooth.async_ble_device_from_address(hass, address, connectable=True)
+        is not None
+    )
     _LOGGER.debug(
-        "Eqiva %s: not present in Bluetooth cache; requesting 10 second active scan",
+        "Eqiva %s: no current scanner path (in connectable history=%s); "
+        "requesting 10 second active scan",
         address,
+        in_history,
     )
     await bluetooth.async_request_active_scan(hass, duration=10.0)
 
-    if bluetooth.async_ble_device_from_address(hass, address, connectable=True) is not None:
-        _LOGGER.debug("Eqiva %s: discovered during active Bluetooth scan", address)
+    current_paths = _current_connection_paths(hass, address)
+    if current_paths:
+        _LOGGER.debug(
+            "Eqiva %s: fresh connection path discovered during active scan via %s scanner(s)",
+            address,
+            len(current_paths),
+        )
         return
 
     discoveries = _eqiva_discoveries(hass)
     if discoveries:
         discovered_addresses = sorted({info.address.upper() for info in discoveries})
+        if address.upper() in discovered_addresses:
+            raise EqivaNotFoundError(
+                f"{address} wurde zwar im Home-Assistant-Bluetooth-Verlauf gesehen, "
+                "aber auch nach 10 Sekunden aktiver Suche steht kein aktueller "
+                "connectable Scanner-Pfad zur Verfügung"
+            )
         _LOGGER.warning(
             "Eqiva advertisement(s) with manufacturer ID 0x1A00 found at %s, "
             "but requested address was %s",
