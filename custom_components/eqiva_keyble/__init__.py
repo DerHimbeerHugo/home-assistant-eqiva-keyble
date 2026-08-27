@@ -15,9 +15,9 @@ from . import secure_trace_patch as _eqiva_secure_trace_patch  # noqa: F401
 # v29 established the proven transport baseline: notifications arrive without
 # an active CCCD write, so the failed SMP/CCCD experiments remain disabled.
 from . import v29_diagnostic_patch as _eqiva_v29_diagnostic_patch  # noqa: F401
-# v31 is a clean A/B probe: use COMMAND=LOCK as the first secure KeyBLE message
-# instead of STATUS_REQUEST, without changing transport, nonces or crypto.
-from . import v31_command_probe as _eqiva_v31_command_probe  # noqa: F401
+# v32 stops protocol-byte experiments and tests a freshly registered KeyBLE
+# user through the existing Key-Card config-flow path.
+from . import v32_pairing_probe as _eqiva_v32_pairing_probe  # noqa: F401
 from .const import CONF_ADDRESS, CONF_NAME, CONF_USER_ID, CONF_USER_KEY
 from .coordinator import EqivaCoordinator
 from .protocol import EqivaKeyBleClient, canonical_key
