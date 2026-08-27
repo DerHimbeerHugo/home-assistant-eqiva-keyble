@@ -17,9 +17,12 @@ from . import secure_trace_patch as _eqiva_secure_trace_patch  # noqa: F401
 from . import v29_diagnostic_patch as _eqiva_v29_diagnostic_patch  # noqa: F401
 # v32 keeps the successful fresh Key-Card pairing path.
 from . import v32_pairing_probe as _eqiva_v32_pairing_probe  # noqa: F401
-# v33 makes the local raw hci path resilient against Home Assistant's short-lived
-# current scanner-path cache and actively rescans before declaring it unavailable.
+# v33 is imported only because v34 reuses its captured pre-v33 connect function;
+# v34 immediately disables v33's cached scanner-path behavior.
 from . import v33_path_resilience_patch as _eqiva_v33_path_resilience_patch  # noqa: F401
+# v34 requires a fresh HA local hci scanner path for every raw L2CAP connection
+# and rescans/retries on the ENOSYS failure seen with the stale v33 cache.
+from . import v34_fresh_path_patch as _eqiva_v34_fresh_path_patch  # noqa: F401
 from .const import CONF_ADDRESS, CONF_NAME, CONF_USER_ID, CONF_USER_KEY
 from .coordinator import EqivaCoordinator
 from .protocol import EqivaKeyBleClient, canonical_key
