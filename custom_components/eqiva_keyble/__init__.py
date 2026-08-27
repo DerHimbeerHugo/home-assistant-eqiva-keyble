@@ -12,13 +12,12 @@ from . import bluez_notify_patch as _eqiva_transport_patch  # noqa: F401
 # Add reproducible secure-frame diagnostics without changing the working raw
 # ATT transport path. This records only session nonces/frame bytes, never keys.
 from . import secure_trace_patch as _eqiva_secure_trace_patch  # noqa: F401
-# v29 leaves the failed SMP experiments disabled. It first tests notify delivery
-# without a CCCD write and falls back on the same connection to the proven CCCD
-# Write Command after a short observation window, while exposing the GATT layout.
+# v29 established the proven transport baseline: notifications arrive without
+# an active CCCD write, so the failed SMP/CCCD experiments remain disabled.
 from . import v29_diagnostic_patch as _eqiva_v29_diagnostic_patch  # noqa: F401
-# v30 changes one byte only: emulate the year encoding used by the ESPHome Eqiva
-# component that is known to work with this lock. All v29 transport behavior stays.
-from . import v30_esp_year_patch as _eqiva_v30_esp_year_patch  # noqa: F401
+# v31 is a clean A/B probe: use COMMAND=LOCK as the first secure KeyBLE message
+# instead of STATUS_REQUEST, without changing transport, nonces or crypto.
+from . import v31_command_probe as _eqiva_v31_command_probe  # noqa: F401
 from .const import CONF_ADDRESS, CONF_NAME, CONF_USER_ID, CONF_USER_KEY
 from .coordinator import EqivaCoordinator
 from .protocol import EqivaKeyBleClient, canonical_key
