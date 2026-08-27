@@ -25,12 +25,11 @@ class EqivaRawATTClient(HaMgmtClient):
     the Bluetooth default MTU of 23 and talks to the lock directly over the kernel
     L2CAP ATT fixed channel.
 
-    The lock is also timing-sensitive during notification setup. The working
-    ESP-IDF implementation first registers its notification callback locally,
-    immediately starts the Key-BLE nonce request, and only afterwards performs
-    the CCCD write from the asynchronous notify-registration event. To reproduce
-    that ordering, notification preparation and remote CCCD enabling are split
-    into two explicit operations here.
+    The lock also disconnects when its CCCD is written as a normal ATT Write
+    Request on this raw path. Therefore the notification handler is registered
+    locally and the CCCD is enabled with a non-blocking ATT Write Command. Key-BLE
+    characteristic traffic can still use the protocol-correct Write Request with
+    response independently.
     """
 
     async def connect(self, pair: bool, **kwargs: Any) -> None:
@@ -119,17 +118,20 @@ class EqivaRawATTClient(HaMgmtClient):
     async def enable_prepared_notify(
         self, characteristic: BleakGATTCharacteristic
     ) -> None:
-        """Enable a previously prepared notification using an ATT Write Request."""
+        """Enable a prepared notification with an ATT Write Command."""
         codec = self._codec()
         cccd, cccd_value = self._notification_cccd(characteristic)
         try:
-            await codec.write(cccd.handle, cccd_value)
+            # Eqiva drops the raw ATT link when this descriptor is sent as a
+            # Write Request. A Write Command does not create an ATT transaction
+            # and therefore lets the Key-BLE CONNECTION_REQUEST follow directly.
+            await codec.write_command(cccd.handle, cccd_value)
         except BaseException:
             codec.remove_notify_handler(characteristic.handle)
             raise
 
         _LOGGER.debug(
-            "%s: Eqiva raw ATT CCCD enabled after nonce write (handle 0x%04x)",
+            "%s: Eqiva raw ATT CCCD enabled via Write Command (handle 0x%04x)",
             self.address,
             cccd.handle,
         )
@@ -145,11 +147,11 @@ class EqivaRawATTClient(HaMgmtClient):
         await self.enable_prepared_notify(characteristic)
 
     async def stop_notify(self, characteristic: BleakGATTCharacteristic) -> None:
-        """Disable notifications with a normal ATT CCCD Write Request."""
+        """Disable notifications without starting an ATT request transaction."""
         codec = self._codec()
         cccd: BleakGATTDescriptor | None = characteristic.get_descriptor(CCCD_UUID)
         try:
             if cccd is not None and self._connected:
-                await codec.write(cccd.handle, _CCCD_OFF)
+                await codec.write_command(cccd.handle, _CCCD_OFF)
         finally:
             codec.remove_notify_handler(characteristic.handle)
