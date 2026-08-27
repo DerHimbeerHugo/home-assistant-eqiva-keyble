@@ -47,6 +47,18 @@ def _local_raw_path(self: EqivaKeyBleClient):
     )
 
 
+def _eqiva_on_disconnect(self: EqivaKeyBleClient, _client: BleakClient) -> None:
+    """Treat a physical BLE drop as a connection error, not authentication."""
+    self._client = None
+    self._reset_gatt()
+    self._reset_session()
+    self._fail_waiters(
+        EqivaConnectionError(
+            "Bluetooth-Verbindung zum Eqiva wurde während der Kommunikation getrennt"
+        )
+    )
+
+
 async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
     """Connect to Eqiva over raw L2CAP/ATT, bypassing bluetoothd GATT/MTU."""
     if self._client is not None and self._client.is_connected:
@@ -218,5 +230,6 @@ async def _eqiva_ensure_nonces_exchanged(self: EqivaKeyBleClient) -> None:
 
 # Temporary compatibility patch while the raw ATT path is validated on real
 # hardware. Once stable, fold this into protocol.py and remove the old BlueZ path.
+EqivaKeyBleClient._on_disconnect = _eqiva_on_disconnect
 EqivaKeyBleClient._connect = _eqiva_connect_raw_att
 EqivaKeyBleClient._ensure_nonces_exchanged = _eqiva_ensure_nonces_exchanged
