@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from typing import Any
 
-from bleak import BleakClient
 from homeassistant.components import bluetooth
 from habluetooth.channels.l2cap import can_use_l2cap
 from habluetooth.client_mgmt import MgmtClientData
+from habluetooth.usage import ORIGINAL_BLEAK_CLIENT
 
 from .const import RECEIVE_CHARACTERISTIC_UUID, SEND_CHARACTERISTIC_UUID
 from .protocol import (
@@ -22,7 +23,7 @@ from .protocol import (
 from .raw_att_client import EqivaRawATTClient
 
 _LOGGER = logging.getLogger(__name__)
-_RAW_MARKER = "RAW-PDU-v15"
+_RAW_MARKER = "RAW-PDU-v16"
 
 
 def _local_raw_path(self: EqivaKeyBleClient):
@@ -48,7 +49,7 @@ def _local_raw_path(self: EqivaKeyBleClient):
     )
 
 
-def _eqiva_on_disconnect(self: EqivaKeyBleClient, _client: BleakClient) -> None:
+def _eqiva_on_disconnect(self: EqivaKeyBleClient, _client: Any) -> None:
     """Treat a physical BLE drop as a connection error, not authentication."""
     self._client = None
     self._reset_gatt()
@@ -92,7 +93,10 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
         scanner = path.scanner
         device = path.ble_device
         source = scanner.source
-        stage = f"{_RAW_MARKER}: Raw L2CAP/ATT verbinden und GATT ohne MTU-Exchange auflösen (Versuch {attempt}/2)"
+        stage = (
+            f"{_RAW_MARKER}: Raw L2CAP/ATT verbinden und GATT ohne MTU-Exchange "
+            f"auflösen (Versuch {attempt}/2)"
+        )
 
         _LOGGER.debug(
             "Eqiva %s: %s raw ATT attempt %s via %s / %s (RSSI %s)",
@@ -104,7 +108,12 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
             path.advertisement.rssi,
         )
 
-        client = BleakClient(
+        # Home Assistant monkey-patches bleak.BleakClient to HaBleakClientWrapper,
+        # which deliberately ignores a custom backend at construction time and
+        # chooses its own backend during connect(). For this one Eqiva-specific
+        # path we must use the original BleakClient saved by habluetooth before
+        # that monkey-patch, otherwise EqivaRawATTClient is never instantiated.
+        client = ORIGINAL_BLEAK_CLIENT(
             device,
             disconnected_callback=self._on_disconnect,
             backend=EqivaRawATTClient,
@@ -131,7 +140,10 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
 
             await client.connect()
 
-            stage = f"{_RAW_MARKER}: Raw ATT GATT-Characteristics auflösen; backend={backend_name}"
+            stage = (
+                f"{_RAW_MARKER}: Raw ATT GATT-Characteristics auflösen; "
+                f"backend={backend_name}; mtu={client.mtu_size}"
+            )
             services = client.services
             self._send_characteristic = services.get_characteristic(
                 SEND_CHARACTERISTIC_UUID
@@ -165,13 +177,9 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
 
             stage = (
                 f"{_RAW_MARKER}: direkten EqivaRawATTClient CCCD Write Command ausführen; "
-                f"backend={backend_name}"
+                f"backend={backend_name}; mtu={client.mtu_size}"
             )
 
-            # Deliberately bypass BleakClient.start_notify(). This proves that the
-            # exact custom backend method is the code path executing at runtime.
-            # Backend callbacks receive only the notification payload, so adapt it
-            # to EqivaKeyBleClient's characteristic+payload callback signature.
             receive_characteristic = self._receive_characteristic
 
             def _raw_notify_callback(data: bytearray) -> None:
