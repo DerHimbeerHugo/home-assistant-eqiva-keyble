@@ -27,20 +27,16 @@ class EqivaRawATTClient(HaMgmtClient):
         else:
             opcode = data[0]
             summary = f"{direction}:0x{opcode:02x}"
-
-            # Operations whose second/third bytes are an attribute/value handle.
             if opcode in (0x04, 0x0A, 0x0C, 0x12, 0x1B, 0x1D, 0x52) and len(data) >= 3:
                 handle = int.from_bytes(data[1:3], "little")
                 summary += f"@0x{handle:04x}"
             elif opcode == 0x01 and len(data) >= 5:
-                # Error Response: request opcode, handle, error code.
                 req_opcode = data[1]
                 handle = int.from_bytes(data[2:4], "little")
                 error_code = data[4]
                 summary += (
                     f"(req=0x{req_opcode:02x},handle=0x{handle:04x},err=0x{error_code:02x})"
                 )
-
             summary += f"[{len(data)}]"
 
         trace = getattr(self, "_eqiva_att_trace", None)
@@ -51,7 +47,6 @@ class EqivaRawATTClient(HaMgmtClient):
         del trace[:-12]
 
     def trace_summary(self) -> str:
-        """Return recent sanitized ATT metadata for diagnostics."""
         trace = getattr(self, "_eqiva_att_trace", None) or []
         return " > ".join(trace) if trace else "keine ATT-PDUs aufgezeichnet"
 
@@ -92,8 +87,6 @@ class EqivaRawATTClient(HaMgmtClient):
                     timeout=self._timeout,
                     security_level=BT_SECURITY_LOW,
                 )
-
-                # IMPORTANT: never call att.exchange_mtu() for this lock.
                 services = await att.discover()
         except BaseException:
             self._handle_disconnect(None)
@@ -120,7 +113,6 @@ class EqivaRawATTClient(HaMgmtClient):
     def _notification_cccd(
         self, characteristic: BleakGATTCharacteristic
     ) -> tuple[BleakGATTDescriptor, bytes]:
-        """Resolve the CCCD and value for a notify/indicate characteristic."""
         if "notify" in characteristic.properties:
             cccd_value = _CCCD_NOTIFY
         elif "indicate" in characteristic.properties:
@@ -138,7 +130,6 @@ class EqivaRawATTClient(HaMgmtClient):
         characteristic: BleakGATTCharacteristic,
         callback: Callable[[bytearray], None],
     ) -> None:
-        """Register the notification handler locally without touching the CCCD."""
         self._notification_cccd(characteristic)
         self._codec().set_notify_handler(characteristic.handle, callback)
         _LOGGER.debug(
@@ -150,7 +141,7 @@ class EqivaRawATTClient(HaMgmtClient):
     async def enable_prepared_notify(
         self, characteristic: BleakGATTCharacteristic
     ) -> None:
-        """Enable a prepared notification with an ATT Write Command."""
+        """Enable notifications initially with a non-blocking ATT Write Command."""
         codec = self._codec()
         cccd, cccd_value = self._notification_cccd(characteristic)
         try:
@@ -158,9 +149,21 @@ class EqivaRawATTClient(HaMgmtClient):
         except BaseException:
             codec.remove_notify_handler(characteristic.handle)
             raise
-
         _LOGGER.debug(
             "%s: Eqiva raw ATT CCCD enabled via Write Command (handle 0x%04x)",
+            self.address,
+            cccd.handle,
+        )
+
+    async def confirm_prepared_notify(
+        self, characteristic: BleakGATTCharacteristic
+    ) -> None:
+        """Repeat the already-enabled CCCD value as a real ATT Write Request."""
+        codec = self._codec()
+        cccd, cccd_value = self._notification_cccd(characteristic)
+        await codec.write(cccd.handle, cccd_value)
+        _LOGGER.debug(
+            "%s: Eqiva raw ATT CCCD confirmed via Write Request (handle 0x%04x)",
             self.address,
             cccd.handle,
         )
@@ -171,12 +174,10 @@ class EqivaRawATTClient(HaMgmtClient):
         callback,
         **kwargs: Any,
     ) -> None:
-        """Standard combined helper retained for Bleak compatibility."""
         self.prepare_notify(characteristic, callback)
         await self.enable_prepared_notify(characteristic)
 
     async def stop_notify(self, characteristic: BleakGATTCharacteristic) -> None:
-        """Disable notifications without starting an ATT request transaction."""
         codec = self._codec()
         cccd: BleakGATTDescriptor | None = characteristic.get_descriptor(CCCD_UUID)
         try:
