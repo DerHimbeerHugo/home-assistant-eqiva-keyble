@@ -15,7 +15,6 @@ _LOGGER = logging.getLogger(__name__)
 _CCCD_NOTIFY = b"\x01\x00"
 _CCCD_INDICATE = b"\x02\x00"
 _CCCD_OFF = b"\x00\x00"
-_ATT_WRITE_COMMAND = 0x52
 
 
 class EqivaRawATTClient(HaMgmtClient):
@@ -27,11 +26,9 @@ class EqivaRawATTClient(HaMgmtClient):
     deliberately leaves ATT at the Bluetooth default MTU of 23 and talks to the
     lock directly over the kernel L2CAP ATT fixed channel.
 
-    Eqiva also does not reliably answer ATT write requests. Characteristic data
-    writes are therefore issued by the protocol layer as Write Commands. For
-    notification setup we go one step further and emit the CCCD Write Command
-    PDU directly on the raw ATT socket so no Bleak/habluetooth request helper can
-    accidentally wait for or translate a response.
+    Once MTU exchange is skipped, use normal ATT Write Requests for the CCCD and
+    Key-BLE characteristic writes. This matches the working ESP-IDF implementation,
+    which writes Key-BLE fragments with ESP_GATT_WRITE_TYPE_RSP.
     """
 
     async def connect(self, pair: bool, **kwargs: Any) -> None:
@@ -91,28 +88,13 @@ class EqivaRawATTClient(HaMgmtClient):
             self.mtu_size,
         )
 
-    async def _raw_write_command(self, handle: int, value: bytes) -> None:
-        """Emit one ATT Write Command PDU directly on the L2CAP channel."""
-        if self._sock is None or not self._connected:
-            raise BleakError("raw ATT socket is not connected")
-        if len(value) > 20:  # MTU 23 minus opcode+handle
-            raise BleakError("raw ATT Write Command payload exceeds MTU 23")
-        pdu = bytes([_ATT_WRITE_COMMAND]) + handle.to_bytes(2, "little") + value
-        _LOGGER.debug(
-            "%s: raw ATT TX Write Command handle=0x%04x len=%d",
-            self.address,
-            handle,
-            len(value),
-        )
-        await self._sock.send(pdu)
-
     async def start_notify(
         self,
         characteristic: BleakGATTCharacteristic,
         callback,
         **kwargs: Any,
     ) -> None:
-        """Enable notifications with a directly emitted CCCD Write Command."""
+        """Enable notifications with a normal ATT CCCD Write Request."""
         codec = self._codec()
         if "notify" in characteristic.properties:
             cccd_value = _CCCD_NOTIFY
@@ -125,29 +107,30 @@ class EqivaRawATTClient(HaMgmtClient):
         if cccd is None:
             raise BleakError("characteristic has no client configuration descriptor")
 
-        # Register locally first so a fast CONNECTION_INFO notification cannot
-        # race past us. Then emit opcode 0x52 directly; a Write Command has no
-        # ATT transaction/future and cannot legitimately produce a Write Response.
+        # Register locally before enabling the CCCD so a very fast notification
+        # cannot race past the callback. The on-air operation is a standard ATT
+        # Write Request/Response, matching the ESP GATT stack once MTU exchange is
+        # removed from the connection sequence.
         codec.set_notify_handler(characteristic.handle, callback)
         try:
-            await self._raw_write_command(cccd.handle, cccd_value)
+            await codec.write(cccd.handle, cccd_value)
         except BaseException:
             codec.remove_notify_handler(characteristic.handle)
             raise
 
         _LOGGER.debug(
-            "%s: Eqiva raw ATT notifications primed via direct CCCD Write Command "
+            "%s: Eqiva raw ATT notifications enabled via CCCD Write Request "
             "(handle 0x%04x)",
             self.address,
             cccd.handle,
         )
 
     async def stop_notify(self, characteristic: BleakGATTCharacteristic) -> None:
-        """Disable notifications without waiting for an ATT response."""
+        """Disable notifications with a normal ATT CCCD Write Request."""
         codec = self._codec()
         cccd: BleakGATTDescriptor | None = characteristic.get_descriptor(CCCD_UUID)
         try:
-            if cccd is not None and self._sock is not None and self._connected:
-                await self._raw_write_command(cccd.handle, _CCCD_OFF)
+            if cccd is not None and self._connected:
+                await codec.write(cccd.handle, _CCCD_OFF)
         finally:
             codec.remove_notify_handler(characteristic.handle)
