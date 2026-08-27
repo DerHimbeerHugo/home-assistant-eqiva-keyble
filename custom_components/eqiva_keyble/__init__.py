@@ -5,6 +5,10 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 
+# Import the Eqiva-specific BlueZ notify compatibility patch before any client
+# instances are created. This keeps config-flow and runtime clients on the same
+# tested connection path while we validate the lock's timing behavior.
+from . import bluez_notify_patch as _bluez_notify_patch  # noqa: F401
 from .const import CONF_ADDRESS, CONF_NAME, CONF_USER_ID, CONF_USER_KEY
 from .coordinator import EqivaCoordinator
 from .protocol import EqivaKeyBleClient, canonical_key
