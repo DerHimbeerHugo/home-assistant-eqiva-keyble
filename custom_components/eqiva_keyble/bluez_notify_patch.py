@@ -23,7 +23,7 @@ from .protocol import (
 from .raw_att_client import EqivaRawATTClient
 
 _LOGGER = logging.getLogger(__name__)
-_RAW_MARKER = "RAW-PDU-v18"
+_RAW_MARKER = "RAW-PDU-v19"
 
 
 def _local_raw_path(self: EqivaKeyBleClient):
@@ -168,8 +168,9 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
                     f"{sorted(receive_properties)}"
                 )
 
-            # Match the working ESP-IDF transport: Key-BLE characteristic writes
-            # are ATT Write Requests with responses. MTU stays fixed at 23.
+            # Keep the protocol-correct Key-BLE write type from v17/v18. The
+            # working ESP implementation uses writes with response for message
+            # fragments; only the troublesome CCCD setup is sent as a command.
             self._write_with_response = True
 
             receive_characteristic = self._receive_characteristic
@@ -178,20 +179,22 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
                 current = self._receive_characteristic or receive_characteristic
                 self._notification_callback(current, data)
 
-            # ESP-IDF first calls esp_ble_gattc_register_for_notify(), which is a
-            # local registration step. It then immediately calls init()/sendNonce().
-            # The actual CCCD write follows later from the asynchronous notify
-            # registration event. Reproduce that ordering explicitly.
             stage = (
                 f"{_RAW_MARKER}: Notify-Handler lokal vorbereiten; "
                 f"backend={backend_name}; mtu={client.mtu_size}"
             )
             backend.prepare_notify(receive_characteristic, _raw_notify_callback)
 
+            stage = (
+                f"{_RAW_MARKER}: CCCD als ATT Write Command VOR CONNECTION_REQUEST aktivieren; "
+                f"backend={backend_name}; mtu={client.mtu_size}"
+            )
+            await backend.enable_prepared_notify(receive_characteristic)
+
             self._local_nonce = os.urandom(8)
             waiter = self._new_waiter(MSG_CONNECTION_INFO)
             stage = (
-                f"{_RAW_MARKER}: CONNECTION_REQUEST VOR CCCD als ATT Write Request senden; "
+                f"{_RAW_MARKER}: CONNECTION_REQUEST als ATT Write Request NACH CCCD-Command senden; "
                 f"user_id={self.user_id}; mtu={client.mtu_size}"
             )
             await self._send_message(
@@ -200,20 +203,14 @@ async def _eqiva_connect_raw_att(self: EqivaKeyBleClient) -> None:
                 secure=False,
             )
 
-            stage = (
-                f"{_RAW_MARKER}: CCCD NACH CONNECTION_REQUEST als ATT Write Request aktivieren; "
-                f"backend={backend_name}; mtu={client.mtu_size}"
-            )
-            await backend.enable_prepared_notify(receive_characteristic)
-
             stage = f"{_RAW_MARKER}: KeyBLE CONNECTION_INFO über raw ATT empfangen"
             try:
                 await asyncio.wait_for(waiter, timeout=5.0)
             except asyncio.TimeoutError as err:
                 raise EqivaHandshakeError(
-                    f"{_RAW_MARKER}: CONNECTION_REQUEST und anschließender CCCD-Write wurden "
-                    "bestätigt, aber das Schloss hat innerhalb von 5 Sekunden keine "
-                    "CONNECTION_INFO-Nonce geliefert."
+                    f"{_RAW_MARKER}: CCCD Write Command wurde gesendet und CONNECTION_REQUEST "
+                    "als ATT Write Request bestätigt, aber das Schloss hat innerhalb von 5 Sekunden "
+                    "keine CONNECTION_INFO-Nonce geliefert."
                 ) from err
 
             if self._remote_nonce is None:
