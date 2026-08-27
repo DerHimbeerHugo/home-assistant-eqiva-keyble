@@ -11,7 +11,7 @@ from .protocol import (
     _pad_end,
 )
 
-_RAW_MARKER = "RAW-PDU-v23"
+_RAW_MARKER = "RAW-PDU-v24"
 
 _ORIGINAL_SEND_MESSAGE = EqivaKeyBleClient._send_message
 _ORIGINAL_REQUEST_STATUS = EqivaKeyBleClient.request_status
@@ -93,14 +93,12 @@ async def _eqiva_send_message_with_secure_trace(
     data: bytes,
     secure: bool,
 ) -> None:
-    """Capture the exact secure KeyBLE frame immediately before it is sent."""
     if secure:
         _remember_secure_tx(self, message_type, data)
     await _ORIGINAL_SEND_MESSAGE(self, message_type, data, secure)
 
 
 async def _eqiva_request_status_with_secure_trace(self: EqivaKeyBleClient):
-    """Augment a secure-request rejection with reproducible session data."""
     try:
         return await _ORIGINAL_REQUEST_STATUS(self)
     except EqivaProtocolError as err:
