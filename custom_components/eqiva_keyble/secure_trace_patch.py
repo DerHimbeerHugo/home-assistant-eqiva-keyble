@@ -11,7 +11,7 @@ from .protocol import (
     _pad_end,
 )
 
-_RAW_MARKER = "RAW-PDU-v24"
+_RAW_MARKER = "RAW-PDU-v25"
 
 _ORIGINAL_SEND_MESSAGE = EqivaKeyBleClient._send_message
 _ORIGINAL_REQUEST_STATUS = EqivaKeyBleClient.request_status
