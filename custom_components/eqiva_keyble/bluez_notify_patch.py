@@ -2,26 +2,64 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
 from .const import RECEIVE_CHARACTERISTIC_UUID, SEND_CHARACTERISTIC_UUID
 from .protocol import (
     EqivaConnectionError,
+    EqivaHandshakeError,
     EqivaKeyBleClient,
     EqivaNotFoundError,
     EqivaProtocolError,
+    MSG_CONNECTION_INFO,
+    MSG_CONNECTION_REQUEST,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 
-async def _eqiva_connect_fast_notify(self: EqivaKeyBleClient) -> None:
-    """Eqiva-specific BlueZ notification setup.
+def _register_bluez_callback_early(self: EqivaKeyBleClient) -> bool:
+    """Register the receive callback locally without enabling the CCCD yet."""
+    client = self._client
+    characteristic = self._receive_characteristic
+    if client is None or characteristic is None:
+        return False
 
-    The lock is very timing-sensitive after service discovery. ESPHome's working
-    implementation registers notifications and immediately continues with protocol
-    initialization, so do not add an artificial idle delay here.
+    backend = getattr(client, "_backend", None)
+    callbacks = getattr(backend, "_notification_callbacks", None)
+    obj = getattr(characteristic, "obj", None)
+    if not isinstance(callbacks, dict) or not obj:
+        return False
+
+    try:
+        char_path = obj[0]
+    except (TypeError, IndexError):
+        return False
+    if not isinstance(char_path, str):
+        return False
+
+    def _backend_callback(data: bytearray) -> None:
+        current = self._receive_characteristic
+        if current is not None:
+            self._notification_callback(current, data)
+
+    callbacks[char_path] = _backend_callback
+    _LOGGER.debug(
+        "Eqiva %s: BlueZ receive callback pre-registered before CCCD enable",
+        self.address,
+    )
+    return True
+
+
+async def _eqiva_connect_primed_notify(self: EqivaKeyBleClient) -> None:
+    """Connect using the ordering used by the working ESPHome implementation.
+
+    ESPHome registers receive handling locally, immediately sends the initial
+    CONNECTION_REQUEST and only then completes remote CCCD activation. BlueZ
+    normally tries to complete CCCD activation before returning from start_notify(),
+    which this lock rejects with ATT 0x0E. Prime the Key-BLE session first.
     """
     if self._client is not None and self._client.is_connected:
         return
@@ -31,6 +69,7 @@ async def _eqiva_connect_fast_notify(self: EqivaKeyBleClient) -> None:
     errors: list[str] = []
 
     for attempt in range(1, 3):
+        waiter = None
         await self._clear_stale_connection()
         if attempt > 1:
             await asyncio.sleep(1.0)
@@ -87,17 +126,28 @@ async def _eqiva_connect_fast_notify(self: EqivaKeyBleClient) -> None:
                     f"{sorted(receive_properties)}"
                 )
 
-            # Force AcquireNotify on the first attempt. v0.1.9 tried to infer the
-            # backend from backend_id, but Home Assistant's wrapper does not expose
-            # 'bluez' there reliably, so that test accidentally used StartNotify.
-            use_acquire_notify = attempt == 1
-            notify_mode = "AcquireNotify" if use_acquire_notify else "StartNotify"
-            stage = f"Notifications aktivieren ({notify_mode})"
+            # Mirror the ESPHome ordering: local receive handling first, then
+            # CONNECTION_REQUEST before the remote CCCD is enabled.
+            _register_bluez_callback_early(self)
+            self._local_nonce = os.urandom(8)
+            waiter = self._new_waiter(MSG_CONNECTION_INFO)
+
+            stage = "CONNECTION_REQUEST vor Notify-Aktivierung senden"
             _LOGGER.debug(
-                "Eqiva %s: enabling notifications immediately via %s",
+                "Eqiva %s: priming Key-BLE session with CONNECTION_REQUEST before CCCD",
                 self.address,
-                notify_mode,
             )
+            await self._send_message(
+                MSG_CONNECTION_REQUEST,
+                bytes([self.user_id]) + self._local_nonce,
+                secure=False,
+            )
+
+            # StartNotify is closest to ESPHome's explicit CCCD write. Keep
+            # AcquireNotify as a second clean-connection fallback.
+            use_acquire_notify = attempt == 2
+            notify_mode = "AcquireNotify" if use_acquire_notify else "StartNotify"
+            stage = f"Notifications aktivieren ({notify_mode}) nach CONNECTION_REQUEST"
             kwargs = (
                 {"bluez": {"use_start_notify": False}}
                 if use_acquire_notify
@@ -108,23 +158,50 @@ async def _eqiva_connect_fast_notify(self: EqivaKeyBleClient) -> None:
                 self._notification_callback,
                 **kwargs,
             )
+
+            stage = "CONNECTION_INFO nach Notify-Aktivierung empfangen"
+            try:
+                await asyncio.wait_for(asyncio.shield(waiter), timeout=1.0)
+            except asyncio.TimeoutError:
+                # The priming response may have been emitted before the CCCD became
+                # active. Repeat the same request once now that notifications are on.
+                _LOGGER.debug(
+                    "Eqiva %s: no CONNECTION_INFO after priming; repeating CONNECTION_REQUEST",
+                    self.address,
+                )
+                await self._send_message(
+                    MSG_CONNECTION_REQUEST,
+                    bytes([self.user_id]) + self._local_nonce,
+                    secure=False,
+                )
+                await asyncio.wait_for(waiter, timeout=4.0)
+
+            if self._remote_nonce is None:
+                raise EqivaHandshakeError(
+                    "Notify ist aktiv, aber das Schloss hat keine CONNECTION_INFO-Nonce geliefert"
+                )
+
             _LOGGER.debug(
-                "Eqiva %s: notifications enabled via %s",
+                "Eqiva %s: notifications and nonce handshake established via %s",
                 self.address,
                 notify_mode,
             )
             return
 
         except EqivaProtocolError:
+            if waiter is not None:
+                self._cancel_waiter(MSG_CONNECTION_INFO, waiter)
             await self._abort_connection()
             raise
         except Exception as err:  # noqa: BLE001
+            if waiter is not None:
+                self._cancel_waiter(MSG_CONNECTION_INFO, waiter)
             errors.append(f"{stage}: {type(err).__name__}: {err}")
             await self._abort_connection()
             await self._clear_stale_connection()
             if attempt == 1:
                 _LOGGER.warning(
-                    "Eqiva %s: first notify/connect path failed (%s); retrying with StartNotify",
+                    "Eqiva %s: primed StartNotify path failed (%s); retrying with AcquireNotify",
                     self.address,
                     errors[-1],
                 )
@@ -141,6 +218,18 @@ async def _eqiva_connect_fast_notify(self: EqivaKeyBleClient) -> None:
     )
 
 
-# Temporary compatibility patch while the Eqiva/BlueZ timing behavior is being
-# validated on real hardware. Once stable, this will be folded back into protocol.py.
-EqivaKeyBleClient._connect = _eqiva_connect_fast_notify
+async def _eqiva_ensure_nonces_exchanged(self: EqivaKeyBleClient) -> None:
+    """The patched connect path already performs the nonce exchange."""
+    if self._remote_nonce is not None and self._local_nonce is not None:
+        return
+    await self._connect()
+    if self._remote_nonce is None or self._local_nonce is None:
+        raise EqivaHandshakeError(
+            "Bluetooth-Verbindung steht, aber der KeyBLE-Nonce-Handshake wurde nicht abgeschlossen"
+        )
+
+
+# Temporary compatibility patch while Eqiva/BlueZ behavior is validated on real
+# hardware. Once stable, fold this back into protocol.py.
+EqivaKeyBleClient._connect = _eqiva_connect_primed_notify
+EqivaKeyBleClient._ensure_nonces_exchanged = _eqiva_ensure_nonces_exchanged
