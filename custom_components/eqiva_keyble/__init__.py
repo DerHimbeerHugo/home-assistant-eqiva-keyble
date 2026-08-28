@@ -42,11 +42,6 @@ from .protocol import EqivaKeyBleClient, canonical_key
 PLATFORMS = [Platform.LOCK, Platform.BINARY_SENSOR]
 
 
-async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload the integration when runtime options change."""
-    await hass.config_entries.async_reload(entry.entry_id)
-
-
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     client = EqivaKeyBleClient(
         hass,
@@ -68,7 +63,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except Exception as err:  # noqa: BLE001
         raise ConfigEntryNotReady(str(err)) from err
     entry.runtime_data = coordinator
-    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
