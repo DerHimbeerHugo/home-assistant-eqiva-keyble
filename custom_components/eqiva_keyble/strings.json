@@ -35,6 +35,17 @@
       "not_supported": "The discovered Bluetooth device is not a supported Eqiva lock."
     }
   },
+  "entity": {
+    "sensor": {
+      "battery_status": {
+        "name": "Battery",
+        "state": {
+          "ok": "OK",
+          "low": "Low"
+        }
+      }
+    }
+  },
   "options": {
     "step": {
       "init": {
