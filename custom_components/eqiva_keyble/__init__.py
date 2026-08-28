@@ -41,7 +41,8 @@ from .const import (
 )
 from .coordinator import EqivaCoordinator
 from .live_client import EqivaLiveKeyBleClient
-from .protocol import EqivaKeyBleClient, canonical_key
+from .protocol import canonical_key
+from .retrying_client import EqivaRetryingKeyBleClient
 
 PLATFORMS = [Platform.LOCK, Platform.SENSOR]
 
@@ -53,7 +54,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     client_class = (
         EqivaLiveKeyBleClient
         if connection_mode == CONNECTION_MODE_LIVE
-        else EqivaKeyBleClient
+        else EqivaRetryingKeyBleClient
     )
     client = client_class(
         hass,
