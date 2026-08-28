@@ -17,7 +17,9 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
             hass,
             _LOGGER,
             name="Eqiva Key-BLE",
-            update_interval=timedelta(minutes=10),
+            # Diagnostic build: poll faster so alternating reconnect failures are
+            # visible within minutes instead of waiting 10 minutes per attempt.
+            update_interval=timedelta(minutes=2),
         )
         self.client = client
 
