@@ -25,6 +25,9 @@ from . import v35_advertisement_connect_patch as _eqiva_v35_advertisement_connec
 # v36 clears HA's static advertisement history and synchronizes raw L2CAP to the
 # next genuinely new local hci advertisement from the sleeping Eqiva lock.
 from . import v36_static_advertisement_wake_patch as _eqiva_v36_static_advertisement_wake_patch  # noqa: F401
+# v37 mirrors original KeyBLE write timing: send a real ATT Write Request but do
+# not wait for its ATT Write Response; the KeyBLE notification is authoritative.
+from . import v37_fire_and_forget_write_patch as _eqiva_v37_fire_and_forget_write_patch  # noqa: F401
 from .const import CONF_ADDRESS, CONF_NAME, CONF_USER_ID, CONF_USER_KEY
 from .coordinator import EqivaCoordinator
 from .protocol import EqivaKeyBleClient, canonical_key
