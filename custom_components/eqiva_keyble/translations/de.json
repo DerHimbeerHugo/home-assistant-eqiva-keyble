@@ -10,12 +10,28 @@
       "key_card": {
         "title": "Mit Key Card koppeln",
         "description": "Scanne den QR-Code der Eqiva Key Card. Halte anschließend am Schloss die Entriegeln-Taste gedrückt, bis die gelbe LED blinkt, und klicke dann auf Senden. Die Key-Card-Daten werden nach erfolgreicher Kopplung nicht gespeichert.\n\nTechnische Diagnose: {error}",
-        "data": {"name": "Name", "key_card": "QR-Code-Daten der Key Card"}
+        "data": {
+          "name": "Name",
+          "key_card": "QR-Code-Daten der Key Card",
+          "connection_mode": "Bluetooth-Verbindungsmodus"
+        },
+        "data_description": {
+          "connection_mode": "Energiesparend verbindet nur bei Bedarf. Live hält die BLE-Session offen, damit manuelle Schlossänderungen sofort in Home Assistant erscheinen können."
+        }
       },
       "credentials": {
         "title": "Vorhandene KeyBLE-Zugangsdaten",
         "description": "Verwende eine bereits registrierte User-ID und den zugehörigen 128-Bit User-Key.\n\nTechnische Diagnose: {error}",
-        "data": {"name": "Name", "address": "Bluetooth-Adresse", "user_id": "User-ID", "user_key": "User-Key"}
+        "data": {
+          "name": "Name",
+          "address": "Bluetooth-Adresse",
+          "user_id": "User-ID",
+          "user_key": "User-Key",
+          "connection_mode": "Bluetooth-Verbindungsmodus"
+        },
+        "data_description": {
+          "connection_mode": "Energiesparend verbindet nur bei Bedarf. Live hält die BLE-Session offen, damit manuelle Schlossänderungen sofort in Home Assistant erscheinen können."
+        }
       }
     },
     "error": {
@@ -46,16 +62,26 @@
       }
     }
   },
+  "selector": {
+    "connection_mode": {
+      "options": {
+        "polling": "Energiesparend – Verbindung nur bei Bedarf",
+        "live": "Live – Verbindung dauerhaft halten"
+      }
+    }
+  },
   "options": {
     "step": {
       "init": {
         "title": "Optionen für das Eqiva Türschloss",
-        "description": "Lege fest, wie oft Home Assistant den Schlossstatus aktiv abfragt.",
+        "description": "Lege Bluetooth-Verbindungsmodus und regelmäßige Vollabfrage des Schlossstatus fest.",
         "data": {
+          "connection_mode": "Bluetooth-Verbindungsmodus",
           "poll_interval": "Abfrageintervall (Minuten)"
         },
         "data_description": {
-          "poll_interval": "Zeit zwischen automatischen Statusabfragen. Kürzere Intervalle liefern aktuellere Zustände, verursachen aber mehr Bluetooth-Aktivität."
+          "connection_mode": "Im Live-Modus bleibt die KeyBLE-Verbindung offen, manuelle Schlossänderungen werden sofort übernommen und eine abgerissene Verbindung wird automatisch wieder aufgebaut. Andere Bluetooth-Clients wie die Eqiva-App können währenddessen nicht gleichzeitig verbinden.",
+          "poll_interval": "Zeit zwischen vollständigen Statusabgleichen. Im Energiesparmodus ist dies das normale Polling-Intervall; im Live-Modus dient es zusätzlich als regelmäßiger Resync."
         }
       }
     }
