@@ -10,12 +10,28 @@
       "key_card": {
         "title": "Pair using Key Card",
         "description": "Scan the QR code from the Eqiva Key Card. Then hold the unlock button on the lock until the yellow LED flashes and submit this form. Key Card data is not stored after pairing.\n\nTechnical diagnosis: {error}",
-        "data": {"name": "Name", "key_card": "Key Card QR data"}
+        "data": {
+          "name": "Name",
+          "key_card": "Key Card QR data",
+          "connection_mode": "Bluetooth connection mode"
+        },
+        "data_description": {
+          "connection_mode": "Energy saving connects only when needed. Live keeps the BLE session open so manual lock changes can be reported immediately."
+        }
       },
       "credentials": {
         "title": "Existing KeyBLE credentials",
         "description": "Use an already registered user ID and its 128-bit user key.\n\nTechnical diagnosis: {error}",
-        "data": {"name": "Name", "address": "Bluetooth address", "user_id": "User ID", "user_key": "User key"}
+        "data": {
+          "name": "Name",
+          "address": "Bluetooth address",
+          "user_id": "User ID",
+          "user_key": "User key",
+          "connection_mode": "Bluetooth connection mode"
+        },
+        "data_description": {
+          "connection_mode": "Energy saving connects only when needed. Live keeps the BLE session open so manual lock changes can be reported immediately."
+        }
       }
     },
     "error": {
@@ -46,16 +62,26 @@
       }
     }
   },
+  "selector": {
+    "connection_mode": {
+      "options": {
+        "polling": "Energy saving – connect only when needed",
+        "live": "Live – keep connection open"
+      }
+    }
+  },
   "options": {
     "step": {
       "init": {
         "title": "Eqiva lock options",
-        "description": "Configure how often Home Assistant actively reads the lock status.",
+        "description": "Configure the Bluetooth connection and how often Home Assistant performs a full status synchronization.",
         "data": {
+          "connection_mode": "Bluetooth connection mode",
           "poll_interval": "Polling interval (minutes)"
         },
         "data_description": {
-          "poll_interval": "Time between automatic status requests. Shorter intervals provide fresher status information but cause more Bluetooth activity."
+          "connection_mode": "Live mode keeps the KeyBLE connection open, reports manual lock changes immediately and reconnects automatically if the link drops. Other Bluetooth clients such as the Eqiva app cannot connect at the same time.",
+          "poll_interval": "Time between full status synchronizations. In energy-saving mode this is the normal polling interval; in live mode it acts as an additional resync interval."
         }
       }
     }
