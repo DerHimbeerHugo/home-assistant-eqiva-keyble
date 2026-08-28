@@ -15,13 +15,7 @@ from .const import (
     CONF_ADDRESS,
     CONF_CONNECTION_MODE,
     CONF_KEY_CARD,
-    CONF_KNX_AVAILABLE_ADDRESS,
-    CONF_KNX_BATTERY_LOW_ADDRESS,
     CONF_KNX_ENABLED,
-    CONF_KNX_LOCK_ADDRESS,
-    CONF_KNX_LOCKED_STATE_ADDRESS,
-    CONF_KNX_OPEN_ADDRESS,
-    CONF_KNX_UNLOCK_ADDRESS,
     CONF_NAME,
     CONF_POLL_INTERVAL,
     CONF_SETUP_METHOD,
@@ -40,6 +34,7 @@ from .const import (
     SETUP_CREDENTIALS,
     SETUP_KEY_CARD,
 )
+from .knx_address import normalize_knx_group_address
 from .protocol import (
     EqivaConnectionError,
     EqivaHandshakeError,
@@ -54,34 +49,6 @@ from .protocol import (
 _LOGGER = logging.getLogger(__name__)
 
 EQIVA_MANUFACTURER_ID = 0x1A00
-
-
-def _normalize_knx_group_address(value: Any) -> str:
-    """Validate and normalize a KNX free-, two- or three-level group address."""
-    address = str(value or "").strip()
-    if not address:
-        return ""
-
-    parts = address.split("/")
-    try:
-        numbers = [int(part) for part in parts]
-    except ValueError as err:
-        raise ValueError(address) from err
-
-    valid = (
-        len(numbers) == 1
-        and 0 <= numbers[0] <= 65535
-        or len(numbers) == 2
-        and 0 <= numbers[0] <= 31
-        and 0 <= numbers[1] <= 2047
-        or len(numbers) == 3
-        and 0 <= numbers[0] <= 31
-        and 0 <= numbers[1] <= 7
-        and 0 <= numbers[2] <= 255
-    )
-    if not valid:
-        raise ValueError(address)
-    return "/".join(str(number) for number in numbers)
 
 
 class EqivaNoScannerError(EqivaNotFoundError):
@@ -397,36 +364,23 @@ class EqivaKeyBleOptionsFlow(OptionsFlowWithReload):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Configure Bluetooth and optional KNX group addresses."""
-        errors: dict[str, str] = {}
+        """Configure Bluetooth and enable the optional KNX bridge."""
         if user_input is not None:
-            normalized_addresses: dict[str, str] = {}
-            for option in KNX_ADDRESS_OPTIONS:
-                try:
-                    normalized_addresses[option] = _normalize_knx_group_address(
-                        user_input.get(option, "")
-                    )
-                except ValueError:
-                    errors[option] = "invalid_knx_group_address"
-
-            configured_addresses = [
-                address for address in normalized_addresses.values() if address
-            ]
-            if len(configured_addresses) != len(set(configured_addresses)):
-                errors["base"] = "duplicate_knx_group_address"
-            elif user_input.get(CONF_KNX_ENABLED) and not configured_addresses:
-                errors["base"] = "knx_no_addresses"
-
-            if not errors:
-                return self.async_create_entry(
-                    title="",
-                    data={
-                        CONF_POLL_INTERVAL: int(user_input[CONF_POLL_INTERVAL]),
-                        CONF_CONNECTION_MODE: user_input[CONF_CONNECTION_MODE],
-                        CONF_KNX_ENABLED: bool(user_input[CONF_KNX_ENABLED]),
-                        **normalized_addresses,
-                    },
+            existing_addresses = {
+                option: normalize_knx_group_address(
+                    self.config_entry.options.get(option, "")
                 )
+                for option in KNX_ADDRESS_OPTIONS
+            }
+            return self.async_create_entry(
+                title="",
+                data={
+                    CONF_POLL_INTERVAL: int(user_input[CONF_POLL_INTERVAL]),
+                    CONF_CONNECTION_MODE: user_input[CONF_CONNECTION_MODE],
+                    CONF_KNX_ENABLED: bool(user_input[CONF_KNX_ENABLED]),
+                    **existing_addresses,
+                },
+            )
 
         displayed_options = (
             user_input if user_input is not None else self.config_entry.options
@@ -446,10 +400,6 @@ class EqivaKeyBleOptionsFlow(OptionsFlowWithReload):
         current_knx_enabled = bool(
             displayed_options.get(CONF_KNX_ENABLED, DEFAULT_KNX_ENABLED)
         )
-        current_knx_addresses = {
-            option: str(displayed_options.get(option, ""))
-            for option in KNX_ADDRESS_OPTIONS
-        }
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
@@ -473,31 +423,6 @@ class EqivaKeyBleOptionsFlow(OptionsFlowWithReload):
                         CONF_KNX_ENABLED,
                         default=current_knx_enabled,
                     ): bool,
-                    vol.Optional(
-                        CONF_KNX_LOCK_ADDRESS,
-                        default=current_knx_addresses[CONF_KNX_LOCK_ADDRESS],
-                    ): str,
-                    vol.Optional(
-                        CONF_KNX_UNLOCK_ADDRESS,
-                        default=current_knx_addresses[CONF_KNX_UNLOCK_ADDRESS],
-                    ): str,
-                    vol.Optional(
-                        CONF_KNX_OPEN_ADDRESS,
-                        default=current_knx_addresses[CONF_KNX_OPEN_ADDRESS],
-                    ): str,
-                    vol.Optional(
-                        CONF_KNX_LOCKED_STATE_ADDRESS,
-                        default=current_knx_addresses[CONF_KNX_LOCKED_STATE_ADDRESS],
-                    ): str,
-                    vol.Optional(
-                        CONF_KNX_BATTERY_LOW_ADDRESS,
-                        default=current_knx_addresses[CONF_KNX_BATTERY_LOW_ADDRESS],
-                    ): str,
-                    vol.Optional(
-                        CONF_KNX_AVAILABLE_ADDRESS,
-                        default=current_knx_addresses[CONF_KNX_AVAILABLE_ADDRESS],
-                    ): str,
                 }
             ),
-            errors=errors,
         )

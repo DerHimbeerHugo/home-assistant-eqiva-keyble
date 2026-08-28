@@ -1,5 +1,5 @@
 DOMAIN = "eqiva_keyble"
-PLATFORMS = ["lock", "sensor"]
+PLATFORMS = ["lock", "sensor", "text"]
 
 CONF_ADDRESS = "address"
 CONF_USER_ID = "user_id"

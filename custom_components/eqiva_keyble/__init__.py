@@ -46,7 +46,7 @@ from .live_client import EqivaLiveKeyBleClient
 from .protocol import canonical_key
 from .retrying_client import EqivaRetryingKeyBleClient
 
-PLATFORMS = [Platform.LOCK, Platform.SENSOR]
+PLATFORMS = [Platform.LOCK, Platform.SENSOR, Platform.TEXT]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

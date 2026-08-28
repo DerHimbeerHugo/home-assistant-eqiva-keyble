@@ -73,6 +73,7 @@ class EqivaKnxBridge:
         self._publish_pending = False
         self._last_sent: dict[str, bool] = {}
         self._started = False
+        self._reconfigure_lock = asyncio.Lock()
 
     async def async_start(self) -> None:
         """Register configured group addresses and publish the initial state."""
@@ -114,6 +115,42 @@ class EqivaKnxBridge:
             len(registered),
         )
         await self._async_publish_all(force=True)
+
+    async def async_reconfigure(self) -> None:
+        """Apply changed group addresses without restarting the BLE client."""
+        async with self._reconfigure_lock:
+            await self.async_stop()
+            self.enabled = bool(
+                self.entry.options.get(CONF_KNX_ENABLED, DEFAULT_KNX_ENABLED)
+            )
+            self.addresses = {
+                option: str(self.entry.options.get(option, "")).strip()
+                for option in KNX_ADDRESS_OPTIONS
+                if str(self.entry.options.get(option, "")).strip()
+            }
+            self._commands = {
+                address: command
+                for option, command in (
+                    (CONF_KNX_LOCK_ADDRESS, "lock"),
+                    (CONF_KNX_UNLOCK_ADDRESS, "unlock"),
+                    (CONF_KNX_OPEN_ADDRESS, "open"),
+                )
+                if (address := self.addresses.get(option))
+            }
+            self._status_options = {
+                address: option
+                for option in (
+                    CONF_KNX_LOCKED_STATE_ADDRESS,
+                    CONF_KNX_BATTERY_LOW_ADDRESS,
+                    CONF_KNX_AVAILABLE_ADDRESS,
+                )
+                if (address := self.addresses.get(option))
+            }
+            self._last_sent.clear()
+            self._command_task = None
+            self._publish_task = None
+            self._publish_pending = False
+            await self.async_start()
 
     @callback
     def _handle_knx_event(self, event: Event) -> None:
