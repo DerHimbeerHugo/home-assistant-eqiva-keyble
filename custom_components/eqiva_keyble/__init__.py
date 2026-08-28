@@ -28,11 +28,23 @@ from . import v36_static_advertisement_wake_patch as _eqiva_v36_static_advertise
 # v37 mirrors original KeyBLE write timing: send a real ATT Write Request but do
 # not wait for its ATT Write Response; the KeyBLE notification is authoritative.
 from . import v37_fire_and_forget_write_patch as _eqiva_v37_fire_and_forget_write_patch  # noqa: F401
-from .const import CONF_ADDRESS, CONF_NAME, CONF_USER_ID, CONF_USER_KEY
+from .const import (
+    CONF_ADDRESS,
+    CONF_NAME,
+    CONF_POLL_INTERVAL,
+    CONF_USER_ID,
+    CONF_USER_KEY,
+    DEFAULT_POLL_INTERVAL,
+)
 from .coordinator import EqivaCoordinator
 from .protocol import EqivaKeyBleClient, canonical_key
 
 PLATFORMS = [Platform.LOCK, Platform.BINARY_SENSOR]
+
+
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload the integration when runtime options change."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -43,12 +55,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         user_key=canonical_key(entry.data[CONF_USER_KEY]),
         name=entry.data.get(CONF_NAME, entry.title),
     )
-    coordinator = EqivaCoordinator(hass, client)
+    poll_interval = int(
+        entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
+    )
+    coordinator = EqivaCoordinator(
+        hass,
+        client,
+        poll_interval_minutes=poll_interval,
+    )
     try:
         await coordinator.async_config_entry_first_refresh()
     except Exception as err:  # noqa: BLE001
         raise ConfigEntryNotReady(str(err)) from err
     entry.runtime_data = coordinator
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
