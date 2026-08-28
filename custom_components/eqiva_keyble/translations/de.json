@@ -60,6 +60,14 @@
           "low": "Schwach"
         }
       }
+    },
+    "text": {
+      "knx_lock_address": {"name": "KNX-Gruppenadresse: Abschließen"},
+      "knx_unlock_address": {"name": "KNX-Gruppenadresse: Aufschließen"},
+      "knx_open_address": {"name": "KNX-Gruppenadresse: Tür öffnen"},
+      "knx_locked_state_address": {"name": "KNX-Gruppenadresse: Status abgeschlossen"},
+      "knx_battery_low_address": {"name": "KNX-Gruppenadresse: Batterie schwach"},
+      "knx_available_address": {"name": "KNX-Gruppenadresse: Erreichbarkeit"}
     }
   },
   "selector": {
@@ -70,37 +78,28 @@
       }
     }
   },
-  "options": {
-    "error": {
-      "invalid_knx_group_address": "Gib eine gültige KNX-Gruppenadresse ein, zum Beispiel 1/2/3.",
-      "duplicate_knx_group_address": "Jede KNX-Funktion muss eine eigene Gruppenadresse verwenden.",
-      "knx_no_addresses": "Trage mindestens eine Gruppenadresse ein, bevor du KNX aktivierst."
+  "exceptions": {
+    "invalid_knx_group_address": {
+      "message": "Ungültige KNX-Gruppenadresse. Beispiele: 1/2/3, 1/123 oder 1234."
     },
+    "duplicate_knx_group_address": {
+      "message": "Diese KNX-Gruppenadresse wird bereits für eine andere Funktion verwendet."
+    }
+  },
+  "options": {
     "step": {
       "init": {
         "title": "Optionen für das Eqiva Türschloss",
-        "description": "Lege Bluetooth und die optionale Anbindung an die bestehende Home-Assistant-KNX/IP-Integration fest. Die Gruppenadressen sind frei wählbar; nicht benötigte Funktionen können leer bleiben.",
+        "description": "Lege Bluetooth fest und aktiviere optional die Anbindung an die bestehende Home-Assistant-KNX/IP-Integration. Nach der Aktivierung können die Gruppenadressen im Abschnitt Konfiguration der Geräteseite eingetragen werden.",
         "data": {
           "connection_mode": "Bluetooth-Verbindungsmodus",
           "poll_interval": "Abfrageintervall (Minuten)",
-          "knx_enabled": "KNX aktivieren",
-          "knx_lock_address": "Gruppenadresse Abschließen",
-          "knx_unlock_address": "Gruppenadresse Aufschließen",
-          "knx_open_address": "Gruppenadresse Tür öffnen",
-          "knx_locked_state_address": "Gruppenadresse Status abgeschlossen",
-          "knx_battery_low_address": "Gruppenadresse Batterie schwach",
-          "knx_available_address": "Gruppenadresse Erreichbarkeit"
+          "knx_enabled": "KNX aktivieren"
         },
         "data_description": {
           "connection_mode": "Im Live-Modus bleibt die KeyBLE-Verbindung offen, manuelle Schlossänderungen werden sofort übernommen und eine abgerissene Verbindung wird automatisch wieder aufgebaut. Andere Bluetooth-Clients wie die Eqiva-App können währenddessen nicht gleichzeitig verbinden.",
           "poll_interval": "Zeit zwischen vollständigen Statusabgleichen. Im Energiesparmodus ist dies das normale Polling-Intervall; im Live-Modus dient es zusätzlich als regelmäßiger Resync.",
-          "knx_enabled": "Verwendet die bestehende KNX/IP-Verbindung von Home Assistant. Es wird kein zweiter KNX-Tunnel geöffnet.",
-          "knx_lock_address": "DPT 1. Nur ein eingehender Wert 1 löst den Befehl aus; 0 wird ignoriert.",
-          "knx_unlock_address": "DPT 1. Nur ein eingehender Wert 1 löst den Befehl aus; 0 wird ignoriert.",
-          "knx_open_address": "DPT 1. Nur ein eingehender Wert 1 zieht die Falle zurück; 0 wird ignoriert.",
-          "knx_locked_state_address": "DPT 1. 1 bedeutet abgeschlossen, 0 bedeutet nicht abgeschlossen. Leseanfragen werden beantwortet.",
-          "knx_battery_low_address": "DPT 1. 1 bedeutet Batterie schwach. Leseanfragen werden beantwortet.",
-          "knx_available_address": "DPT 1. 1 bedeutet, dass die letzte Kommunikation mit dem Schloss erfolgreich war. Leseanfragen werden beantwortet."
+          "knx_enabled": "Verwendet die bestehende KNX/IP-Verbindung von Home Assistant. Es wird kein zweiter KNX-Tunnel geöffnet. Nach der Aktivierung erscheinen die Gruppenadressen auf der Geräteseite."
         }
       }
     }

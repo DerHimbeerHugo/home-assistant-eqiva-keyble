@@ -60,6 +60,14 @@
           "low": "Low"
         }
       }
+    },
+    "text": {
+      "knx_lock_address": {"name": "KNX group address: Lock"},
+      "knx_unlock_address": {"name": "KNX group address: Unlock"},
+      "knx_open_address": {"name": "KNX group address: Open latch"},
+      "knx_locked_state_address": {"name": "KNX group address: Locked status"},
+      "knx_battery_low_address": {"name": "KNX group address: Battery low"},
+      "knx_available_address": {"name": "KNX group address: Availability"}
     }
   },
   "selector": {
@@ -70,37 +78,28 @@
       }
     }
   },
-  "options": {
-    "error": {
-      "invalid_knx_group_address": "Enter a valid KNX group address, for example 1/2/3.",
-      "duplicate_knx_group_address": "Each KNX function must use a different group address.",
-      "knx_no_addresses": "Enter at least one group address before enabling KNX."
+  "exceptions": {
+    "invalid_knx_group_address": {
+      "message": "Invalid KNX group address. Examples: 1/2/3, 1/123 or 1234."
     },
+    "duplicate_knx_group_address": {
+      "message": "This KNX group address is already assigned to another function."
+    }
+  },
+  "options": {
     "step": {
       "init": {
         "title": "Eqiva lock options",
-        "description": "Configure Bluetooth and the optional connection to the existing Home Assistant KNX/IP integration. KNX addresses may be entered freely; unused functions can remain empty.",
+        "description": "Configure Bluetooth and enable the optional connection to the existing Home Assistant KNX/IP integration. After KNX is enabled, group addresses can be edited in the Configuration section of the device page.",
         "data": {
           "connection_mode": "Bluetooth connection mode",
           "poll_interval": "Polling interval (minutes)",
-          "knx_enabled": "Enable KNX",
-          "knx_lock_address": "Lock command group address",
-          "knx_unlock_address": "Unlock command group address",
-          "knx_open_address": "Open-latch command group address",
-          "knx_locked_state_address": "Locked status group address",
-          "knx_battery_low_address": "Battery-low status group address",
-          "knx_available_address": "Availability status group address"
+          "knx_enabled": "Enable KNX"
         },
         "data_description": {
           "connection_mode": "Live mode keeps the KeyBLE connection open, reports manual lock changes immediately and reconnects automatically if the link drops. Other Bluetooth clients such as the Eqiva app cannot connect at the same time.",
           "poll_interval": "Time between full status synchronizations. In energy-saving mode this is the normal polling interval; in live mode it acts as an additional resync interval.",
-          "knx_enabled": "Uses Home Assistant's existing KNX/IP connection. No second KNX tunnel is opened.",
-          "knx_lock_address": "DPT 1. Only an incoming value 1 triggers the command; 0 is ignored.",
-          "knx_unlock_address": "DPT 1. Only an incoming value 1 triggers the command; 0 is ignored.",
-          "knx_open_address": "DPT 1. Only an incoming value 1 retracts the latch; 0 is ignored.",
-          "knx_locked_state_address": "DPT 1. 1 means locked, 0 means not locked. Read requests are answered.",
-          "knx_battery_low_address": "DPT 1. 1 means the battery is low. Read requests are answered.",
-          "knx_available_address": "DPT 1. 1 means the last lock communication was successful. Read requests are answered."
+          "knx_enabled": "Uses Home Assistant's existing KNX/IP connection. No second KNX tunnel is opened. Group addresses appear on the device page after enabling KNX."
         }
       }
     }
