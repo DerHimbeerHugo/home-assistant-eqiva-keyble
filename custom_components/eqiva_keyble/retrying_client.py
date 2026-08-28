@@ -23,6 +23,7 @@ _RETRYABLE_CONNECTION_ERRORS = (
     EqivaHandshakeError,
     EqivaNotFoundError,
 )
+_CONNECTION_ATTEMPTS = 2
 _CONNECTION_RETRY_DELAY = 1.0
 
 
@@ -36,21 +37,39 @@ class EqivaRetryingKeyBleClient(EqivaKeyBleClient):
         lock/unlock/open commands must never be blindly duplicated after an
         ambiguous write or response timeout.
         """
-        for attempt in range(1, 3):
+        loop = asyncio.get_running_loop()
+        for attempt in range(1, _CONNECTION_ATTEMPTS + 1):
+            started = loop.time()
             try:
                 await self._connect()
                 await self._ensure_nonces_exchanged()
+                _LOGGER.debug(
+                    "Eqiva %s: connection/session attempt %s/%s succeeded "
+                    "after %.3f s",
+                    self.address,
+                    attempt,
+                    _CONNECTION_ATTEMPTS,
+                    loop.time() - started,
+                )
                 return
             except _RETRYABLE_CONNECTION_ERRORS as err:
                 await self._abort_connection()
-                if attempt == 2:
-                    raise
                 _LOGGER.debug(
-                    "Eqiva %s: connection/session attempt %s failed (%s); "
-                    "retrying once after %.1f s",
+                    "Eqiva %s: connection/session attempt %s/%s failed "
+                    "after %.3f s (%s: %s)",
                     self.address,
                     attempt,
+                    _CONNECTION_ATTEMPTS,
+                    loop.time() - started,
+                    type(err).__name__,
                     err,
+                )
+                if attempt == _CONNECTION_ATTEMPTS:
+                    raise
+                _LOGGER.debug(
+                    "Eqiva %s: waiting %.1f s before the final fresh-advertisement "
+                    "session retry",
+                    self.address,
                     _CONNECTION_RETRY_DELAY,
                 )
                 await asyncio.sleep(_CONNECTION_RETRY_DELAY)

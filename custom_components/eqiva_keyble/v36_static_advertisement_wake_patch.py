@@ -56,7 +56,8 @@ async def _wait_for_fresh_local_advertisement(
 ) -> str:
     """Wait for the next genuinely new Eqiva advertisement from local hci."""
     loop = asyncio.get_running_loop()
-    seen: asyncio.Future[str] = loop.create_future()
+    wait_started = loop.time()
+    seen: asyncio.Future[tuple[str, int | None]] = loop.create_future()
 
     # Eqiva advertisements are effectively static. Home Assistant normally
     # suppresses unchanged repeats before integration callbacks. Clearing the
@@ -70,7 +71,7 @@ async def _wait_for_fresh_local_advertisement(
         source = getattr(service_info, "source", None)
         if not _is_local_hci_source(self, source):
             return
-        seen.set_result(source)
+        seen.set_result((source, getattr(service_info, "rssi", None)))
 
     unload = bluetooth.async_register_callback(
         self.hass,
@@ -88,7 +89,7 @@ async def _wait_for_fresh_local_advertisement(
 
     try:
         async with asyncio.timeout(timeout):
-            source = await seen
+            source, rssi = await seen
     except TimeoutError as err:
         raise EqivaNotFoundError(
             f"{_RAW_MARKER}: innerhalb von {timeout:.0f} Sekunden wurde kein neues "
@@ -103,6 +104,15 @@ async def _wait_for_fresh_local_advertisement(
     deadline = loop.time() + 0.75
     while loop.time() < deadline:
         if _LIVE_LOCAL_RAW_PATH(self) is not None:
+            _LOGGER.debug(
+                "Eqiva %s: %s fresh local advertisement after %.3fs "
+                "source=%s rssi=%s",
+                self.address,
+                _RAW_MARKER,
+                loop.time() - wait_started,
+                source,
+                rssi if rssi is not None else "unknown",
+            )
             return source
         await asyncio.sleep(0.025)
 
@@ -116,57 +126,33 @@ async def _connect_v36(self: EqivaKeyBleClient) -> None:
     if self._client is not None and self._client.is_connected:
         return
 
-    last_error: Exception | None = None
-
-    for wake_attempt in range(1, 4):
-        try:
-            source = await _wait_for_fresh_local_advertisement(self)
-        except EqivaNotFoundError as err:
-            last_error = err
-            if wake_attempt < 3:
-                _LOGGER.warning(
-                    "Eqiva %s: %s wake attempt %d/3 saw no usable fresh local advertisement; retrying",
-                    self.address,
-                    _RAW_MARKER,
-                    wake_attempt,
-                )
-                continue
-            raise
-
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    source = await _wait_for_fresh_local_advertisement(self)
+    _LOGGER.debug(
+        "Eqiva %s: %s opening one raw ATT session after fresh advertisement "
+        "from %s",
+        self.address,
+        _RAW_MARKER,
+        source,
+    )
+    try:
+        await _BASE_CONNECT(self)
+    except (EqivaConnectionError, EqivaNotFoundError) as err:
         _LOGGER.debug(
-            "Eqiva %s: %s fresh advertisement from local source %s; raw ATT wake attempt %d/3",
+            "Eqiva %s: %s raw ATT session attempt failed after %.3fs: %s",
             self.address,
             _RAW_MARKER,
-            source,
-            wake_attempt,
+            loop.time() - started,
+            err,
         )
+        raise
 
-        try:
-            await _BASE_CONNECT(self)
-            return
-        except EqivaNotFoundError as err:
-            # The short-lived scanner path can disappear between advertisement
-            # callback and raw connect. Wait for the next radio packet rather
-            # than using stale scanner objects.
-            last_error = err
-            continue
-        except EqivaConnectionError as err:
-            last_error = err
-            text = str(err)
-            if "Errno 38" not in text and "Function not implemented" not in text:
-                raise
-            _LOGGER.warning(
-                "Eqiva %s: %s raw L2CAP establishment returned ENOSYS after fresh advertisement "
-                "(attempt %d/3); waiting for the next advertising cycle",
-                self.address,
-                _RAW_MARKER,
-                wake_attempt,
-            )
-            continue
-
-    raise EqivaConnectionError(
-        f"{_RAW_MARKER}: raw L2CAP konnte nach drei frischen lokalen Eqiva-Werbezyklen "
-        f"nicht aufgebaut werden. Letzter Fehler: {last_error}"
+    _LOGGER.debug(
+        "Eqiva %s: %s raw ATT session established after %.3fs",
+        self.address,
+        _RAW_MARKER,
+        loop.time() - started,
     )
 
 

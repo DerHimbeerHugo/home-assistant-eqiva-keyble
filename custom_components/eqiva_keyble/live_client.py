@@ -41,8 +41,15 @@ class EqivaLiveKeyBleClient(EqivaRetryingKeyBleClient):
 
     def _on_disconnect(self, client: BleakClient) -> None:
         """Reset the protocol session and request a reconnect while live mode is active."""
+        intentional = client is getattr(
+            self, "_eqiva_intentional_disconnect_client", None
+        )
         super()._on_disconnect(client)
-        if not self._closing and self._live_disconnect_callback is not None:
+        if (
+            not intentional
+            and not self._closing
+            and self._live_disconnect_callback is not None
+        ):
             self._live_disconnect_callback()
 
     def _handle_fragment(self, fragment: bytes) -> None:
