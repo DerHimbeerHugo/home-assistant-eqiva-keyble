@@ -18,9 +18,9 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
             hass,
             _LOGGER,
             name="Eqiva Key-BLE",
-            # Diagnostic build: narrow down the idle-time threshold between the
-            # stable 5-minute and problematic 10-minute polling runs.
-            update_interval=timedelta(minutes=7),
+            # Diagnostic build: reproduce the previously observed reconnect
+            # failures at 10 minutes with the v40 idle diagnostics enabled.
+            update_interval=timedelta(minutes=10),
         )
         self.client = client
         self._poll_sequence = 0
