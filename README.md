@@ -98,9 +98,11 @@ usage compared with energy-saving mode.
 
 The optional KNX bridge uses Home Assistant's existing KNX/IP connection; it
 does not open a second tunnel. Enable it under **Settings → Devices & services →
-Eqiva Bluetooth Smart Lock → Configure** and enter only the group addresses you
-need. Free-level, two-level and three-level KNX group-address formats are
-accepted.
+Eqiva Bluetooth Smart Lock → Configure**. Home Assistant then adds editable KNX
+group-address fields to the **Configuration** section of the lock's device page.
+Enter only the addresses you need. Free-level, two-level and three-level KNX
+group-address formats are accepted. Existing addresses entered with v0.3.0b1
+are retained automatically.
 
 All KNX objects use DPT 1. Lock, unlock and open-latch commands have separate
 addresses and react only to an incoming value `1`; value `0`, responses and
