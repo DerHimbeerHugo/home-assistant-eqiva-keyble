@@ -34,5 +34,19 @@
       "already_configured": "Dieses Schloss ist bereits eingerichtet.",
       "not_supported": "Das gefundene Bluetooth-Gerät ist kein unterstütztes Eqiva-Schloss."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Optionen für das Eqiva Türschloss",
+        "description": "Lege fest, wie oft Home Assistant den Schlossstatus aktiv abfragt.",
+        "data": {
+          "poll_interval": "Abfrageintervall (Minuten)"
+        },
+        "data_description": {
+          "poll_interval": "Zeit zwischen automatischen Statusabfragen. Kürzere Intervalle liefern aktuellere Zustände, verursachen aber mehr Bluetooth-Aktivität."
+        }
+      }
+    }
   }
 }
