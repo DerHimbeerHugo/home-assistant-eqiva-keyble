@@ -39,7 +39,7 @@ from .const import (
 from .coordinator import EqivaCoordinator
 from .protocol import EqivaKeyBleClient, canonical_key
 
-PLATFORMS = [Platform.LOCK, Platform.BINARY_SENSOR]
+PLATFORMS = [Platform.LOCK, Platform.SENSOR]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
