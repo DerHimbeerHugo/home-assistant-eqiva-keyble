@@ -34,5 +34,19 @@
       "already_configured": "This lock is already configured.",
       "not_supported": "The discovered Bluetooth device is not a supported Eqiva lock."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Eqiva lock options",
+        "description": "Configure how often Home Assistant actively reads the lock status.",
+        "data": {
+          "poll_interval": "Polling interval (minutes)"
+        },
+        "data_description": {
+          "poll_interval": "Time between automatic status requests. Shorter intervals provide fresher status information but cause more Bluetooth activity."
+        }
+      }
+    }
   }
 }
