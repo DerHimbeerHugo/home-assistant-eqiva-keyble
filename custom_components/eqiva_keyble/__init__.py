@@ -20,9 +20,12 @@ from . import v32_pairing_probe as _eqiva_v32_pairing_probe  # noqa: F401
 # v33 is imported only because v34 reuses its captured pre-v33 connect function;
 # v34 immediately disables v33's cached scanner-path behavior.
 from . import v33_path_resilience_patch as _eqiva_v33_path_resilience_patch  # noqa: F401
-# v34 requires a fresh HA local hci scanner path for every raw L2CAP connection
-# and rescans/retries on the ENOSYS failure seen with the stale v33 cache.
+# v34 restores live scanner paths and exposes the pre-v33 raw connect function.
 from . import v34_fresh_path_patch as _eqiva_v34_fresh_path_patch  # noqa: F401
+# v35 treats Linux ENOSYS during LE establishment as a transient Bluetooth
+# connection failure and synchronizes every retry to a newly received local
+# advertisement from the sleeping Eqiva lock.
+from . import v35_advertisement_connect_patch as _eqiva_v35_advertisement_connect_patch  # noqa: F401
 from .const import CONF_ADDRESS, CONF_NAME, CONF_USER_ID, CONF_USER_KEY
 from .coordinator import EqivaCoordinator
 from .protocol import EqivaKeyBleClient, canonical_key
