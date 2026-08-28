@@ -13,12 +13,16 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_ADDRESS,
+    CONF_CONNECTION_MODE,
     CONF_KEY_CARD,
     CONF_NAME,
     CONF_POLL_INTERVAL,
     CONF_SETUP_METHOD,
     CONF_USER_ID,
     CONF_USER_KEY,
+    CONNECTION_MODE_LIVE,
+    CONNECTION_MODE_POLLING,
+    DEFAULT_CONNECTION_MODE,
     DEFAULT_NAME,
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
@@ -49,6 +53,16 @@ class EqivaNoScannerError(EqivaNotFoundError):
 
 class EqivaAddressMismatchError(EqivaNotFoundError):
     """An Eqiva advertisement was found under another Bluetooth address."""
+
+
+def _connection_mode_selector() -> selector.SelectSelector:
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=[CONNECTION_MODE_POLLING, CONNECTION_MODE_LIVE],
+            mode=selector.SelectSelectorMode.DROPDOWN,
+            translation_key="connection_mode",
+        )
+    )
 
 
 def _eqiva_discoveries(hass) -> list:
@@ -201,7 +215,10 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_USER_ID: user_id,
                         CONF_USER_KEY: user_key.hex(),
                     },
-                    options={CONF_POLL_INTERVAL: DEFAULT_POLL_INTERVAL},
+                    options={
+                        CONF_POLL_INTERVAL: DEFAULT_POLL_INTERVAL,
+                        CONF_CONNECTION_MODE: user_input[CONF_CONNECTION_MODE],
+                    },
                 )
             except AbortFlow:
                 raise
@@ -242,6 +259,10 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({
                 vol.Required(CONF_NAME, default=DEFAULT_NAME): str,
                 vol.Required(CONF_KEY_CARD): str,
+                vol.Required(
+                    CONF_CONNECTION_MODE,
+                    default=DEFAULT_CONNECTION_MODE,
+                ): _connection_mode_selector(),
             }),
             errors=errors,
             description_placeholders=description_placeholders,
@@ -272,7 +293,10 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_USER_ID: user_id,
                         CONF_USER_KEY: key.hex(),
                     },
-                    options={CONF_POLL_INTERVAL: DEFAULT_POLL_INTERVAL},
+                    options={
+                        CONF_POLL_INTERVAL: DEFAULT_POLL_INTERVAL,
+                        CONF_CONNECTION_MODE: user_input[CONF_CONNECTION_MODE],
+                    },
                 )
             except AbortFlow:
                 raise
@@ -320,6 +344,10 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 address_field: str,
                 vol.Required(CONF_USER_ID): vol.Coerce(int),
                 vol.Required(CONF_USER_KEY): str,
+                vol.Required(
+                    CONF_CONNECTION_MODE,
+                    default=DEFAULT_CONNECTION_MODE,
+                ): _connection_mode_selector(),
             }),
             errors=errors,
             description_placeholders=description_placeholders,
@@ -332,12 +360,13 @@ class EqivaKeyBleOptionsFlow(OptionsFlowWithReload):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Configure polling behaviour."""
+        """Configure polling and Bluetooth connection behaviour."""
         if user_input is not None:
             return self.async_create_entry(
                 title="",
                 data={
                     CONF_POLL_INTERVAL: int(user_input[CONF_POLL_INTERVAL]),
+                    CONF_CONNECTION_MODE: user_input[CONF_CONNECTION_MODE],
                 },
             )
 
@@ -347,10 +376,20 @@ class EqivaKeyBleOptionsFlow(OptionsFlowWithReload):
                 DEFAULT_POLL_INTERVAL,
             )
         )
+        current_mode = str(
+            self.config_entry.options.get(
+                CONF_CONNECTION_MODE,
+                DEFAULT_CONNECTION_MODE,
+            )
+        )
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
+                    vol.Required(
+                        CONF_CONNECTION_MODE,
+                        default=current_mode,
+                    ): _connection_mode_selector(),
                     vol.Required(
                         CONF_POLL_INTERVAL,
                         default=current_interval,
@@ -361,7 +400,7 @@ class EqivaKeyBleOptionsFlow(OptionsFlowWithReload):
                             step=1,
                             mode=selector.NumberSelectorMode.BOX,
                         )
-                    )
+                    ),
                 }
             ),
         )
