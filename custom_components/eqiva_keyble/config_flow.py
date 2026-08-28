@@ -6,18 +6,24 @@ from typing import Any
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.components import bluetooth
-from homeassistant.config_entries import ConfigFlowResult
+from homeassistant.config_entries import ConfigEntry, ConfigFlowResult, OptionsFlowWithReload
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import AbortFlow
+from homeassistant.helpers import selector
 
 from .const import (
     CONF_ADDRESS,
     CONF_KEY_CARD,
     CONF_NAME,
+    CONF_POLL_INTERVAL,
     CONF_SETUP_METHOD,
     CONF_USER_ID,
     CONF_USER_KEY,
     DEFAULT_NAME,
+    DEFAULT_POLL_INTERVAL,
     DOMAIN,
+    MAX_POLL_INTERVAL,
+    MIN_POLL_INTERVAL,
     SETUP_CREDENTIALS,
     SETUP_KEY_CARD,
 )
@@ -82,11 +88,6 @@ async def _async_ensure_lock_seen(hass, address: str) -> None:
         )
         return
 
-    # async_ble_device_from_address() reads Home Assistant's connection history.
-    # A device may still be present there even after the local scanner's current
-    # cache no longer contains a usable connection path. HaBleakClientWrapper
-    # deliberately connects through async_scanner_devices_by_address(), so a
-    # history hit alone is not enough.
     in_history = (
         bluetooth.async_ble_device_from_address(hass, address, connectable=True)
         is not None
@@ -138,6 +139,14 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         self._discovered_address: str | None = None
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: ConfigEntry,
+    ) -> EqivaKeyBleOptionsFlow:
+        """Create the Eqiva options flow."""
+        return EqivaKeyBleOptionsFlow()
 
     async def async_step_bluetooth(self, discovery_info) -> ConfigFlowResult:
         """Handle native Home Assistant Bluetooth discovery."""
@@ -192,6 +201,7 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_USER_ID: user_id,
                         CONF_USER_KEY: user_key.hex(),
                     },
+                    options={CONF_POLL_INTERVAL: DEFAULT_POLL_INTERVAL},
                 )
             except AbortFlow:
                 raise
@@ -262,6 +272,7 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_USER_ID: user_id,
                         CONF_USER_KEY: key.hex(),
                     },
+                    options={CONF_POLL_INTERVAL: DEFAULT_POLL_INTERVAL},
                 )
             except AbortFlow:
                 raise
@@ -312,4 +323,45 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             }),
             errors=errors,
             description_placeholders=description_placeholders,
+        )
+
+
+class EqivaKeyBleOptionsFlow(OptionsFlowWithReload):
+    """Manage Eqiva runtime options."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Configure polling behaviour."""
+        if user_input is not None:
+            return self.async_create_entry(
+                title="",
+                data={
+                    CONF_POLL_INTERVAL: int(user_input[CONF_POLL_INTERVAL]),
+                },
+            )
+
+        current_interval = int(
+            self.config_entry.options.get(
+                CONF_POLL_INTERVAL,
+                DEFAULT_POLL_INTERVAL,
+            )
+        )
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_POLL_INTERVAL,
+                        default=current_interval,
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=MIN_POLL_INTERVAL,
+                            max=MAX_POLL_INTERVAL,
+                            step=1,
+                            mode=selector.NumberSelectorMode.BOX,
+                        )
+                    )
+                }
+            ),
         )
