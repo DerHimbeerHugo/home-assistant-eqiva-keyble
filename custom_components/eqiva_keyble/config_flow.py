@@ -6,18 +6,28 @@ from typing import Any
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.components import bluetooth
-from homeassistant.config_entries import ConfigFlowResult
+from homeassistant.config_entries import ConfigEntry, ConfigFlowResult, OptionsFlowWithReload
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import AbortFlow
+from homeassistant.helpers import selector
 
 from .const import (
     CONF_ADDRESS,
+    CONF_CONNECTION_MODE,
     CONF_KEY_CARD,
     CONF_NAME,
+    CONF_POLL_INTERVAL,
     CONF_SETUP_METHOD,
     CONF_USER_ID,
     CONF_USER_KEY,
+    CONNECTION_MODE_LIVE,
+    CONNECTION_MODE_POLLING,
+    DEFAULT_CONNECTION_MODE,
     DEFAULT_NAME,
+    DEFAULT_POLL_INTERVAL,
     DOMAIN,
+    MAX_POLL_INTERVAL,
+    MIN_POLL_INTERVAL,
     SETUP_CREDENTIALS,
     SETUP_KEY_CARD,
 )
@@ -43,6 +53,16 @@ class EqivaNoScannerError(EqivaNotFoundError):
 
 class EqivaAddressMismatchError(EqivaNotFoundError):
     """An Eqiva advertisement was found under another Bluetooth address."""
+
+
+def _connection_mode_selector() -> selector.SelectSelector:
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=[CONNECTION_MODE_POLLING, CONNECTION_MODE_LIVE],
+            mode=selector.SelectSelectorMode.DROPDOWN,
+            translation_key="connection_mode",
+        )
+    )
 
 
 def _eqiva_discoveries(hass) -> list:
@@ -82,11 +102,6 @@ async def _async_ensure_lock_seen(hass, address: str) -> None:
         )
         return
 
-    # async_ble_device_from_address() reads Home Assistant's connection history.
-    # A device may still be present there even after the local scanner's current
-    # cache no longer contains a usable connection path. HaBleakClientWrapper
-    # deliberately connects through async_scanner_devices_by_address(), so a
-    # history hit alone is not enough.
     in_history = (
         bluetooth.async_ble_device_from_address(hass, address, connectable=True)
         is not None
@@ -138,6 +153,14 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         self._discovered_address: str | None = None
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: ConfigEntry,
+    ) -> EqivaKeyBleOptionsFlow:
+        """Create the Eqiva options flow."""
+        return EqivaKeyBleOptionsFlow()
 
     async def async_step_bluetooth(self, discovery_info) -> ConfigFlowResult:
         """Handle native Home Assistant Bluetooth discovery."""
@@ -192,6 +215,10 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_USER_ID: user_id,
                         CONF_USER_KEY: user_key.hex(),
                     },
+                    options={
+                        CONF_POLL_INTERVAL: DEFAULT_POLL_INTERVAL,
+                        CONF_CONNECTION_MODE: user_input[CONF_CONNECTION_MODE],
+                    },
                 )
             except AbortFlow:
                 raise
@@ -232,6 +259,10 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({
                 vol.Required(CONF_NAME, default=DEFAULT_NAME): str,
                 vol.Required(CONF_KEY_CARD): str,
+                vol.Required(
+                    CONF_CONNECTION_MODE,
+                    default=DEFAULT_CONNECTION_MODE,
+                ): _connection_mode_selector(),
             }),
             errors=errors,
             description_placeholders=description_placeholders,
@@ -261,6 +292,10 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_ADDRESS: address,
                         CONF_USER_ID: user_id,
                         CONF_USER_KEY: key.hex(),
+                    },
+                    options={
+                        CONF_POLL_INTERVAL: DEFAULT_POLL_INTERVAL,
+                        CONF_CONNECTION_MODE: user_input[CONF_CONNECTION_MODE],
                     },
                 )
             except AbortFlow:
@@ -309,7 +344,63 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 address_field: str,
                 vol.Required(CONF_USER_ID): vol.Coerce(int),
                 vol.Required(CONF_USER_KEY): str,
+                vol.Required(
+                    CONF_CONNECTION_MODE,
+                    default=DEFAULT_CONNECTION_MODE,
+                ): _connection_mode_selector(),
             }),
             errors=errors,
             description_placeholders=description_placeholders,
+        )
+
+
+class EqivaKeyBleOptionsFlow(OptionsFlowWithReload):
+    """Manage Eqiva runtime options."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Configure polling and Bluetooth connection behaviour."""
+        if user_input is not None:
+            return self.async_create_entry(
+                title="",
+                data={
+                    CONF_POLL_INTERVAL: int(user_input[CONF_POLL_INTERVAL]),
+                    CONF_CONNECTION_MODE: user_input[CONF_CONNECTION_MODE],
+                },
+            )
+
+        current_interval = int(
+            self.config_entry.options.get(
+                CONF_POLL_INTERVAL,
+                DEFAULT_POLL_INTERVAL,
+            )
+        )
+        current_mode = str(
+            self.config_entry.options.get(
+                CONF_CONNECTION_MODE,
+                DEFAULT_CONNECTION_MODE,
+            )
+        )
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_CONNECTION_MODE,
+                        default=current_mode,
+                    ): _connection_mode_selector(),
+                    vol.Required(
+                        CONF_POLL_INTERVAL,
+                        default=current_interval,
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=MIN_POLL_INTERVAL,
+                            max=MAX_POLL_INTERVAL,
+                            step=1,
+                            mode=selector.NumberSelectorMode.BOX,
+                        )
+                    ),
+                }
+            ),
         )

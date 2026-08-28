@@ -28,22 +28,50 @@ from . import v36_static_advertisement_wake_patch as _eqiva_v36_static_advertise
 # v37 mirrors original KeyBLE write timing: send a real ATT Write Request but do
 # not wait for its ATT Write Response; the KeyBLE notification is authoritative.
 from . import v37_fire_and_forget_write_patch as _eqiva_v37_fire_and_forget_write_patch  # noqa: F401
-from .const import CONF_ADDRESS, CONF_NAME, CONF_USER_ID, CONF_USER_KEY
+from .const import (
+    CONF_ADDRESS,
+    CONF_CONNECTION_MODE,
+    CONF_NAME,
+    CONF_POLL_INTERVAL,
+    CONF_USER_ID,
+    CONF_USER_KEY,
+    CONNECTION_MODE_LIVE,
+    DEFAULT_CONNECTION_MODE,
+    DEFAULT_POLL_INTERVAL,
+)
 from .coordinator import EqivaCoordinator
-from .protocol import EqivaKeyBleClient, canonical_key
+from .live_client import EqivaLiveKeyBleClient
+from .protocol import canonical_key
+from .retrying_client import EqivaRetryingKeyBleClient
 
-PLATFORMS = [Platform.LOCK, Platform.BINARY_SENSOR]
+PLATFORMS = [Platform.LOCK, Platform.SENSOR]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    client = EqivaKeyBleClient(
+    connection_mode = str(
+        entry.options.get(CONF_CONNECTION_MODE, DEFAULT_CONNECTION_MODE)
+    )
+    client_class = (
+        EqivaLiveKeyBleClient
+        if connection_mode == CONNECTION_MODE_LIVE
+        else EqivaRetryingKeyBleClient
+    )
+    client = client_class(
         hass,
         entry.data[CONF_ADDRESS],
         user_id=int(entry.data[CONF_USER_ID]),
         user_key=canonical_key(entry.data[CONF_USER_KEY]),
         name=entry.data.get(CONF_NAME, entry.title),
     )
-    coordinator = EqivaCoordinator(hass, client)
+    poll_interval = int(
+        entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
+    )
+    coordinator = EqivaCoordinator(
+        hass,
+        client,
+        poll_interval_minutes=poll_interval,
+        connection_mode=connection_mode,
+    )
     try:
         await coordinator.async_config_entry_first_refresh()
     except Exception as err:  # noqa: BLE001

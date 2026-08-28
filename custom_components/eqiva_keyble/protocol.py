@@ -203,6 +203,7 @@ class EqivaKeyBleClient:
         self.user_key = user_key
         self.name = name
         self._client: BleakClient | None = None
+        self._eqiva_intentional_disconnect_client: BleakClient | None = None
         self._send_characteristic: BleakGATTCharacteristic | None = None
         self._receive_characteristic: BleakGATTCharacteristic | None = None
         self._write_with_response = True
@@ -397,6 +398,7 @@ class EqivaKeyBleClient:
         self._client = None
         self._reset_gatt()
         self._reset_session()
+        self._eqiva_intentional_disconnect_client = client
         if client is not None and client.is_connected:
             try:
                 await client.disconnect()
@@ -411,6 +413,7 @@ class EqivaKeyBleClient:
         client = self._client
         if client is None:
             return
+        self._eqiva_intentional_disconnect_client = client
         try:
             if client.is_connected:
                 try:
