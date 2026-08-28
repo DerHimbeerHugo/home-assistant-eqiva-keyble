@@ -12,15 +12,15 @@ from .protocol import (
     STATUS_LOCKED,
     STATUS_OPENED,
     STATUS_UNLOCKED,
-    EqivaKeyBleClient,
     EqivaProtocolError,
     EqivaStatus,
 )
+from .retrying_client import EqivaRetryingKeyBleClient
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class EqivaLiveKeyBleClient(EqivaKeyBleClient):
+class EqivaLiveKeyBleClient(EqivaRetryingKeyBleClient):
     """KeyBLE client that keeps the BLE/session connection open."""
 
     def __init__(self, *args, **kwargs) -> None:
@@ -92,7 +92,7 @@ class EqivaLiveKeyBleClient(EqivaKeyBleClient):
         """Read status while preserving the established KeyBLE session."""
         async with self._operation_lock:
             try:
-                await self._connect()
+                await self._ensure_session_with_retry()
                 return await self.request_status()
             except Exception:
                 await self._abort_connection()
@@ -103,10 +103,13 @@ class EqivaLiveKeyBleClient(EqivaKeyBleClient):
         command: int,
         targets: set[int],
     ) -> EqivaStatus:
-        """Execute a command without disconnecting after completion."""
+        """Prepare the live session with retry, then send the command once."""
         async with self._operation_lock:
             try:
-                await self._connect()
+                await self._ensure_session_with_retry()
+
+                # Do not retry after COMMAND has been sent; a transport timeout can
+                # be ambiguous and the lock may already be moving.
                 await self._send_message(
                     MSG_COMMAND,
                     bytes([command]),
