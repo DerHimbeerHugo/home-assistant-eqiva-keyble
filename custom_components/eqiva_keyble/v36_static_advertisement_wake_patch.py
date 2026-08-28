@@ -15,6 +15,7 @@ from .protocol import EqivaConnectionError, EqivaKeyBleClient, EqivaNotFoundErro
 
 _LOGGER = logging.getLogger(__name__)
 _RAW_MARKER = "RAW-PDU-v36"
+_DIAGNOSTIC_MARKER = "SESSION-DIAG-v0.2"
 
 _transport_patch._RAW_MARKER = _RAW_MARKER
 _secure_trace_patch._RAW_MARKER = _RAW_MARKER
@@ -49,6 +50,23 @@ def _is_local_hci_source(self: EqivaKeyBleClient, source: str | None) -> bool:
     )
 
 
+def _local_path_summary(self: EqivaKeyBleClient) -> str:
+    path = _LIVE_LOCAL_RAW_PATH(self)
+    if path is None:
+        return "none"
+
+    scanner = path.scanner
+    advertisement = path.advertisement
+    rssi = advertisement.rssi
+    return (
+        "present("
+        f"source={scanner.source},adapter={scanner.adapter},"
+        f"adapter_idx={scanner.adapter_idx},"
+        f"rssi={rssi if rssi is not None else 'unknown'}"
+        ")"
+    )
+
+
 async def _wait_for_fresh_local_advertisement(
     self: EqivaKeyBleClient,
     *,
@@ -57,13 +75,31 @@ async def _wait_for_fresh_local_advertisement(
     """Wait for the next genuinely new Eqiva advertisement from local hci."""
     loop = asyncio.get_running_loop()
     wait_started = loop.time()
-    seen: asyncio.Future[tuple[str, int | None]] = loop.create_future()
+    seen: asyncio.Future[tuple[str, int | None, str, str]] = loop.create_future()
+
+    path_before_clear = _local_path_summary(self)
+    cached_device_before_clear = self._fresh_ble_device() is not None
+    _LOGGER.debug(
+        "Eqiva %s: %s WAKE-START timeout=%.1fs cached_ble_device=%s "
+        "local_path_before_clear=%s",
+        self.address,
+        _DIAGNOSTIC_MARKER,
+        timeout,
+        cached_device_before_clear,
+        path_before_clear,
+    )
 
     # Eqiva advertisements are effectively static. Home Assistant normally
     # suppresses unchanged repeats before integration callbacks. Clearing the
     # history makes the next radio packet count as new again; this API exists
     # specifically for static advertisements used as a wake signal before GATT.
     bluetooth.async_clear_advertisement_history(self.hass, self.address)
+    _LOGGER.debug(
+        "Eqiva %s: %s advertisement history cleared after %.3fs",
+        self.address,
+        _DIAGNOSTIC_MARKER,
+        loop.time() - wait_started,
+    )
 
     def _advertisement_received(service_info, change) -> None:
         if seen.done():
@@ -71,7 +107,21 @@ async def _wait_for_fresh_local_advertisement(
         source = getattr(service_info, "source", None)
         if not _is_local_hci_source(self, source):
             return
-        seen.set_result((source, getattr(service_info, "rssi", None)))
+        rssi = getattr(service_info, "rssi", None)
+        change_name = getattr(change, "name", str(change))
+        path_at_callback = _local_path_summary(self)
+        _LOGGER.debug(
+            "Eqiva %s: %s FRESH-ADVERTISEMENT after %.3fs source=%s "
+            "rssi=%s change=%s local_path_at_callback=%s",
+            self.address,
+            _DIAGNOSTIC_MARKER,
+            loop.time() - wait_started,
+            source,
+            rssi if rssi is not None else "unknown",
+            change_name,
+            path_at_callback,
+        )
+        seen.set_result((source, rssi, change_name, path_at_callback))
 
     unload = bluetooth.async_register_callback(
         self.hass,
@@ -89,8 +139,17 @@ async def _wait_for_fresh_local_advertisement(
 
     try:
         async with asyncio.timeout(timeout):
-            source, rssi = await seen
+            source, rssi, change_name, path_at_callback = await seen
     except TimeoutError as err:
+        _LOGGER.warning(
+            "Eqiva %s: %s WAKE-TIMEOUT after %.3fs cached_ble_device=%s "
+            "local_path_now=%s",
+            self.address,
+            _DIAGNOSTIC_MARKER,
+            loop.time() - wait_started,
+            self._fresh_ble_device() is not None,
+            _local_path_summary(self),
+        )
         raise EqivaNotFoundError(
             f"{_RAW_MARKER}: innerhalb von {timeout:.0f} Sekunden wurde kein neues "
             "Eqiva-Advertisement von einem lokalen hci-Adapter empfangen"
@@ -105,13 +164,16 @@ async def _wait_for_fresh_local_advertisement(
     while loop.time() < deadline:
         if _LIVE_LOCAL_RAW_PATH(self) is not None:
             _LOGGER.debug(
-                "Eqiva %s: %s fresh local advertisement after %.3fs "
-                "source=%s rssi=%s",
+                "Eqiva %s: %s WAKE-READY after %.3fs source=%s rssi=%s "
+                "change=%s callback_path=%s current_path=%s",
                 self.address,
-                _RAW_MARKER,
+                _DIAGNOSTIC_MARKER,
                 loop.time() - wait_started,
                 source,
                 rssi if rssi is not None else "unknown",
+                change_name,
+                path_at_callback,
+                _local_path_summary(self),
             )
             return source
         await asyncio.sleep(0.025)
@@ -124,35 +186,45 @@ async def _wait_for_fresh_local_advertisement(
 
 async def _connect_v36(self: EqivaKeyBleClient) -> None:
     if self._client is not None and self._client.is_connected:
+        _LOGGER.debug(
+            "Eqiva %s: %s CONNECT-SKIP existing client is connected",
+            self.address,
+            _DIAGNOSTIC_MARKER,
+        )
         return
 
     loop = asyncio.get_running_loop()
     started = loop.time()
     source = await _wait_for_fresh_local_advertisement(self)
     _LOGGER.debug(
-        "Eqiva %s: %s opening one raw ATT session after fresh advertisement "
-        "from %s",
+        "Eqiva %s: %s CONNECT-START one raw ATT session after fresh "
+        "advertisement source=%s local_path=%s",
         self.address,
-        _RAW_MARKER,
+        _DIAGNOSTIC_MARKER,
         source,
+        _local_path_summary(self),
     )
     try:
         await _BASE_CONNECT(self)
     except (EqivaConnectionError, EqivaNotFoundError) as err:
         _LOGGER.debug(
-            "Eqiva %s: %s raw ATT session attempt failed after %.3fs: %s",
+            "Eqiva %s: %s CONNECT-FAILED after %.3fs error=%s: %s "
+            "local_path_now=%s",
             self.address,
-            _RAW_MARKER,
+            _DIAGNOSTIC_MARKER,
             loop.time() - started,
+            type(err).__name__,
             err,
+            _local_path_summary(self),
         )
         raise
 
     _LOGGER.debug(
-        "Eqiva %s: %s raw ATT session established after %.3fs",
+        "Eqiva %s: %s CONNECT-SUCCESS after %.3fs source=%s",
         self.address,
-        _RAW_MARKER,
+        _DIAGNOSTIC_MARKER,
         loop.time() - started,
+        source,
     )
 
 
