@@ -1,5 +1,5 @@
 DOMAIN = "eqiva_keyble"
-PLATFORMS = ["lock", "binary_sensor"]
+PLATFORMS = ["lock", "sensor"]
 
 CONF_ADDRESS = "address"
 CONF_USER_ID = "user_id"
@@ -8,14 +8,19 @@ CONF_KEY_CARD = "key_card"
 CONF_NAME = "name"
 CONF_SETUP_METHOD = "setup_method"
 CONF_POLL_INTERVAL = "poll_interval"
+CONF_CONNECTION_MODE = "connection_mode"
 
 SETUP_KEY_CARD = "key_card"
 SETUP_CREDENTIALS = "credentials"
+
+CONNECTION_MODE_POLLING = "polling"
+CONNECTION_MODE_LIVE = "live"
 
 DEFAULT_NAME = "Eqiva Türschloss"
 DEFAULT_POLL_INTERVAL = 10
 MIN_POLL_INTERVAL = 1
 MAX_POLL_INTERVAL = 60
+DEFAULT_CONNECTION_MODE = CONNECTION_MODE_POLLING
 
 SERVICE_UUID = "58e06900-15d8-11e6-b737-0002a5d5c51b"
 SEND_CHARACTERISTIC_UUID = "3141dd40-15db-11e6-a24b-0002a5d5c51b"
