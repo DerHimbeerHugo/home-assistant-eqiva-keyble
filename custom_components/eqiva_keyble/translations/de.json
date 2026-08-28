@@ -35,6 +35,17 @@
       "not_supported": "Das gefundene Bluetooth-Gerät ist kein unterstütztes Eqiva-Schloss."
     }
   },
+  "entity": {
+    "sensor": {
+      "battery_status": {
+        "name": "Batterie",
+        "state": {
+          "ok": "i.O.",
+          "low": "Schwach"
+        }
+      }
+    }
+  },
   "options": {
     "step": {
       "init": {
