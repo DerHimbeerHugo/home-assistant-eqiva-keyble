@@ -30,20 +30,32 @@ from . import v36_static_advertisement_wake_patch as _eqiva_v36_static_advertise
 from . import v37_fire_and_forget_write_patch as _eqiva_v37_fire_and_forget_write_patch  # noqa: F401
 from .const import (
     CONF_ADDRESS,
+    CONF_CONNECTION_MODE,
     CONF_NAME,
     CONF_POLL_INTERVAL,
     CONF_USER_ID,
     CONF_USER_KEY,
+    CONNECTION_MODE_LIVE,
+    DEFAULT_CONNECTION_MODE,
     DEFAULT_POLL_INTERVAL,
 )
 from .coordinator import EqivaCoordinator
+from .live_client import EqivaLiveKeyBleClient
 from .protocol import EqivaKeyBleClient, canonical_key
 
 PLATFORMS = [Platform.LOCK, Platform.SENSOR]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    client = EqivaKeyBleClient(
+    connection_mode = str(
+        entry.options.get(CONF_CONNECTION_MODE, DEFAULT_CONNECTION_MODE)
+    )
+    client_class = (
+        EqivaLiveKeyBleClient
+        if connection_mode == CONNECTION_MODE_LIVE
+        else EqivaKeyBleClient
+    )
+    client = client_class(
         hass,
         entry.data[CONF_ADDRESS],
         user_id=int(entry.data[CONF_USER_ID]),
@@ -57,6 +69,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass,
         client,
         poll_interval_minutes=poll_interval,
+        connection_mode=connection_mode,
     )
     try:
         await coordinator.async_config_entry_first_refresh()
