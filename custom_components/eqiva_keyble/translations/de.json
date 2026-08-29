@@ -97,8 +97,8 @@
           "knx_enabled": "KNX aktivieren"
         },
         "data_description": {
-          "connection_mode": "Im Live-Modus bleibt die KeyBLE-Verbindung offen, manuelle Schlossänderungen werden sofort übernommen und eine abgerissene Verbindung wird automatisch wieder aufgebaut. Andere Bluetooth-Clients wie die Eqiva-App können währenddessen nicht gleichzeitig verbinden.",
-          "poll_interval": "Zeit zwischen vollständigen Statusabgleichen. Im Energiesparmodus ist dies das normale Polling-Intervall; im Live-Modus dient es zusätzlich als regelmäßiger Resync.",
+          "connection_mode": "Im Live-Modus bleibt die KeyBLE-Verbindung offen. Ein automatischer Status-Keepalive spätestens alle 3 Minuten verhindert den Leerlauf-Timeout des Schlosses; manuelle Schlossänderungen werden sofort übernommen und echte Verbindungsabbrüche automatisch wieder aufgebaut. Andere Bluetooth-Clients wie die Eqiva-App können währenddessen nicht gleichzeitig verbinden.",
+          "poll_interval": "Zeit zwischen vollständigen Statusabgleichen. Im Energiesparmodus ist dies das normale Polling-Intervall; im Live-Modus bleibt es ein zusätzlicher Resync und ist unabhängig vom automatischen 3-Minuten-Keepalive.",
           "knx_enabled": "Verwendet die bestehende KNX/IP-Verbindung von Home Assistant. Es wird kein zweiter KNX-Tunnel geöffnet. Nach der Aktivierung erscheinen die Gruppenadressen auf der Geräteseite."
         }
       }
