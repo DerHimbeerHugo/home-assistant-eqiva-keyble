@@ -83,6 +83,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     knx_bridge = EqivaKnxBridge(hass, entry, coordinator)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = knx_bridge
     await knx_bridge.async_start()
+    coordinator.async_start_live_keepalive()
     return True
 
 

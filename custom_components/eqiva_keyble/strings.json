@@ -97,8 +97,8 @@
           "knx_enabled": "Enable KNX"
         },
         "data_description": {
-          "connection_mode": "Live mode keeps the KeyBLE connection open, reports manual lock changes immediately and reconnects automatically if the link drops. Other Bluetooth clients such as the Eqiva app cannot connect at the same time.",
-          "poll_interval": "Time between full status synchronizations. In energy-saving mode this is the normal polling interval; in live mode it acts as an additional resync interval.",
+          "connection_mode": "Live mode keeps the KeyBLE connection open. An automatic status keepalive at least every 3 minutes prevents the lock's idle timeout; manual changes are reported immediately and genuine disconnects are reconnected automatically. Other Bluetooth clients such as the Eqiva app cannot connect at the same time.",
+          "poll_interval": "Time between full status synchronizations. In energy-saving mode this is the normal polling interval; in live mode it remains an additional resync independent of the automatic 3-minute keepalive.",
           "knx_enabled": "Uses Home Assistant's existing KNX/IP connection. No second KNX tunnel is opened. Group addresses appear on the device page after enabling KNX."
         }
       }

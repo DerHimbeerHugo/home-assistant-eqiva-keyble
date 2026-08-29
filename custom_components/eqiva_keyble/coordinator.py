@@ -20,6 +20,7 @@ _LOGGER = logging.getLogger(__name__)
 
 _DIAGNOSTIC_MARKER = "SESSION-DIAG-v0.2"
 _LIVE_RECONNECT_DELAYS = (2, 5, 10, 20, 30, 60)
+_LIVE_KEEPALIVE_INTERVAL = 3 * 60
 
 
 class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
@@ -42,6 +43,9 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
         self.live_mode = connection_mode == CONNECTION_MODE_LIVE
         self._stopping = False
         self._reconnect_task: asyncio.Task[None] | None = None
+        self._keepalive_task: asyncio.Task[None] | None = None
+        self._live_activity_event = asyncio.Event()
+        self._last_live_activity: float | None = None
         self._poll_sequence = 0
         self._last_poll_started: float | None = None
         self._last_poll_finished: float | None = None
@@ -107,6 +111,7 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
         finished = monotonic()
         self._last_poll_finished = finished
         self._last_poll_succeeded = True
+        self._record_live_activity(finished)
         _LOGGER.debug(
             "Eqiva %s: %s poll=%d SUCCESS after %.3fs "
             "lock_status=%d battery_low=%s pairing_allowed=%s",
@@ -124,7 +129,100 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
         """Publish a status received immediately after STATUS_CHANGED."""
         if self._stopping:
             return
+        self._record_live_activity()
         self.async_set_updated_data(status)
+
+    def async_start_live_keepalive(self) -> None:
+        """Start the independent live-session keepalive after initial setup."""
+        if (
+            not self.live_mode
+            or self._stopping
+            or (
+                self._keepalive_task is not None
+                and not self._keepalive_task.done()
+            )
+        ):
+            return
+
+        if self._last_live_activity is None:
+            self._record_live_activity()
+        self._keepalive_task = self.hass.async_create_task(
+            self._async_live_keepalive_loop(),
+            "Eqiva live keepalive",
+        )
+
+    def _record_live_activity(self, timestamp: float | None = None) -> None:
+        """Move the keepalive deadline after successful live-session traffic."""
+        if not self.live_mode:
+            return
+        self._last_live_activity = timestamp if timestamp is not None else monotonic()
+        self._live_activity_event.set()
+
+    async def _async_live_keepalive_loop(self) -> None:
+        """Keep an idle live session open with a status request every three minutes."""
+        try:
+            while not self._stopping and self.live_mode:
+                self._live_activity_event.clear()
+                last_activity = self._last_live_activity or monotonic()
+                remaining = max(
+                    0.0,
+                    _LIVE_KEEPALIVE_INTERVAL - (monotonic() - last_activity),
+                )
+                try:
+                    await asyncio.wait_for(
+                        self._live_activity_event.wait(),
+                        timeout=remaining,
+                    )
+                    continue
+                except TimeoutError:
+                    pass
+
+                if self._stopping:
+                    return
+                if (
+                    self._last_live_activity is not None
+                    and monotonic() - self._last_live_activity
+                    < _LIVE_KEEPALIVE_INTERVAL
+                ):
+                    continue
+                if (
+                    self._reconnect_task is not None
+                    and not self._reconnect_task.done()
+                ):
+                    await self._live_activity_event.wait()
+                    continue
+
+                started = monotonic()
+                try:
+                    status = await self.client.status()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.debug(
+                        "Eqiva %s: live keepalive failed: %s",
+                        self.client.address,
+                        err,
+                        exc_info=True,
+                    )
+                    # A client-side abort is intentionally hidden from the raw
+                    # transport's disconnect callback. Explicitly hand the
+                    # failed keepalive to the coordinator reconnect loop too.
+                    self._handle_live_disconnect()
+                    continue
+
+                self._record_live_activity()
+                _LOGGER.debug(
+                    "Eqiva %s: live keepalive succeeded after %.3fs",
+                    self.client.address,
+                    monotonic() - started,
+                )
+                # Preserve the separately configured coordinator refresh
+                # schedule when the keepalive confirms unchanged data.
+                if status != self.data:
+                    self.async_set_updated_data(status)
+        finally:
+            if self._keepalive_task is asyncio.current_task():
+                self._keepalive_task = None
 
     def _handle_live_disconnect(self) -> None:
         """Mark live data unavailable and start one reconnect loop."""
@@ -171,6 +269,7 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
                     "Eqiva live connection restored after %s reconnect attempt(s)",
                     attempt + 1,
                 )
+                self._record_live_activity()
                 self.async_set_updated_data(status)
                 return
         finally:
@@ -179,19 +278,33 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
 
     async def async_lock(self) -> None:
         status = await self.client.lock()
+        self._record_live_activity()
         self.async_set_updated_data(status)
 
     async def async_unlock(self) -> None:
         status = await self.client.unlock()
+        self._record_live_activity()
         self.async_set_updated_data(status)
 
     async def async_open(self) -> None:
         status = await self.client.open()
+        self._record_live_activity()
         self.async_set_updated_data(status)
 
     async def async_shutdown(self) -> None:
         """Stop reconnect work and close a persistent KeyBLE session."""
         self._stopping = True
+        self._live_activity_event.set()
+
+        keepalive_task = self._keepalive_task
+        self._keepalive_task = None
+        if keepalive_task is not None and not keepalive_task.done():
+            keepalive_task.cancel()
+            try:
+                await keepalive_task
+            except asyncio.CancelledError:
+                pass
+
         task = self._reconnect_task
         self._reconnect_task = None
         if task is not None and not task.done():
