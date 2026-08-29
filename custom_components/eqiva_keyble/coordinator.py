@@ -31,16 +31,21 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
         poll_interval_minutes: int = DEFAULT_POLL_INTERVAL,
         connection_mode: str = DEFAULT_CONNECTION_MODE,
     ) -> None:
+        live_mode = connection_mode == CONNECTION_MODE_LIVE
         super().__init__(
             hass,
             _LOGGER,
             name="Eqiva Key-BLE",
-            update_interval=timedelta(minutes=poll_interval_minutes),
+            update_interval=(
+                None
+                if live_mode
+                else timedelta(minutes=poll_interval_minutes)
+            ),
         )
         self.client = client
         self.poll_interval_minutes = poll_interval_minutes
         self.connection_mode = connection_mode
-        self.live_mode = connection_mode == CONNECTION_MODE_LIVE
+        self.live_mode = live_mode
         self._stopping = False
         self._reconnect_task: asyncio.Task[None] | None = None
         self._keepalive_task: asyncio.Task[None] | None = None
@@ -78,7 +83,7 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
         _LOGGER.debug(
             "Eqiva %s: %s poll=%d START "
             "since_previous_start=%s idle_since_previous_finish=%s "
-            "previous_result=%s client_connected=%s mode=%s interval=%dmin",
+            "previous_result=%s client_connected=%s mode=%s interval=%s",
             self.client.address,
             _DIAGNOSTIC_MARKER,
             sequence,
@@ -87,7 +92,11 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
             _format_result(self._last_poll_succeeded),
             client_connected,
             self.connection_mode,
-            self.poll_interval_minutes,
+            (
+                "keepalive-only"
+                if self.live_mode
+                else f"{self.poll_interval_minutes}min"
+            ),
         )
         self._last_poll_started = started
 
@@ -216,8 +225,8 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
                     self.client.address,
                     monotonic() - started,
                 )
-                # Preserve the separately configured coordinator refresh
-                # schedule when the keepalive confirms unchanged data.
+                # Avoid unnecessary listener updates when the keepalive merely
+                # confirms the already published state.
                 if status != self.data:
                     self.async_set_updated_data(status)
         finally:

@@ -366,6 +366,15 @@ class EqivaKeyBleOptionsFlow(OptionsFlowWithReload):
     ) -> ConfigFlowResult:
         """Configure Bluetooth and enable the optional KNX bridge."""
         if user_input is not None:
+            poll_interval = int(
+                user_input.get(
+                    CONF_POLL_INTERVAL,
+                    self.config_entry.options.get(
+                        CONF_POLL_INTERVAL,
+                        DEFAULT_POLL_INTERVAL,
+                    ),
+                )
+            )
             existing_addresses = {
                 option: normalize_knx_group_address(
                     self.config_entry.options.get(option, "")
@@ -375,7 +384,7 @@ class EqivaKeyBleOptionsFlow(OptionsFlowWithReload):
             return self.async_create_entry(
                 title="",
                 data={
-                    CONF_POLL_INTERVAL: int(user_input[CONF_POLL_INTERVAL]),
+                    CONF_POLL_INTERVAL: poll_interval,
                     CONF_CONNECTION_MODE: user_input[CONF_CONNECTION_MODE],
                     CONF_KNX_ENABLED: bool(user_input[CONF_KNX_ENABLED]),
                     **existing_addresses,
@@ -400,29 +409,33 @@ class EqivaKeyBleOptionsFlow(OptionsFlowWithReload):
         current_knx_enabled = bool(
             displayed_options.get(CONF_KNX_ENABLED, DEFAULT_KNX_ENABLED)
         )
+        schema: dict[Any, Any] = {
+            vol.Required(
+                CONF_CONNECTION_MODE,
+                default=current_mode,
+            ): _connection_mode_selector(),
+        }
+        if current_mode != CONNECTION_MODE_LIVE:
+            schema[
+                vol.Required(
+                    CONF_POLL_INTERVAL,
+                    default=current_interval,
+                )
+            ] = selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=MIN_POLL_INTERVAL,
+                    max=MAX_POLL_INTERVAL,
+                    step=1,
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            )
+        schema[
+            vol.Required(
+                CONF_KNX_ENABLED,
+                default=current_knx_enabled,
+            )
+        ] = bool
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_CONNECTION_MODE,
-                        default=current_mode,
-                    ): _connection_mode_selector(),
-                    vol.Required(
-                        CONF_POLL_INTERVAL,
-                        default=current_interval,
-                    ): selector.NumberSelector(
-                        selector.NumberSelectorConfig(
-                            min=MIN_POLL_INTERVAL,
-                            max=MAX_POLL_INTERVAL,
-                            step=1,
-                            mode=selector.NumberSelectorMode.BOX,
-                        )
-                    ),
-                    vol.Required(
-                        CONF_KNX_ENABLED,
-                        default=current_knx_enabled,
-                    ): bool,
-                }
-            ),
+            data_schema=vol.Schema(schema),
         )
