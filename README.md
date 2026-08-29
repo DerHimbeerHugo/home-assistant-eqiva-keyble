@@ -24,7 +24,7 @@ service or cloud account is required.
 - Native `lock` entity with lock, unlock and open-latch commands
 - Immediate locking, unlocking and opening transition states
 - Translated battery status sensor (`OK` / `Low`, `i.O.` / `Schwach`)
-- Configurable full status synchronization from 1 to 60 minutes
+- Configurable 1–60 minute status synchronization in energy-saving mode
 - Energy-saving polling mode with connections only when required
 - Live mode with persistent KeyBLE session, 3-minute keepalive and immediate manual status changes
 - Automatic reconnect with bounded backoff in live mode
@@ -73,8 +73,9 @@ because they are required for future encrypted communication with the lock.
 
 ## Connection modes
 
-The mode and synchronization interval can be changed under
-**Settings → Devices & services → Eqiva Bluetooth Smart Lock → Configure**.
+The mode can be changed under **Settings → Devices & services → Eqiva Bluetooth
+Smart Lock → Configure**. The synchronization interval is shown only while
+energy-saving mode is active.
 
 ### Energy saving (default)
 
@@ -89,8 +90,8 @@ are reported immediately, and an unexpected disconnect starts an automatic
 reconnect with bounded backoff. An independent status keepalive runs after at
 most three idle minutes, matching the proven ESPHome setup and preventing the
 lock's roughly four-minute idle timeout. Any successful command or status
-traffic restarts that keepalive timer. The configured interval remains active
-as an additional full status synchronization.
+traffic restarts that keepalive timer. This keepalive is the only scheduled
+status synchronization in live mode, so no separate polling interval is shown.
 
 The Eqiva lock accepts only a limited number of simultaneous Bluetooth
 connections. The official Eqiva app or another KeyBLE client may therefore be
