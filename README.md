@@ -26,7 +26,7 @@ service or cloud account is required.
 - Translated battery status sensor (`OK` / `Low`, `i.O.` / `Schwach`)
 - Configurable full status synchronization from 1 to 60 minutes
 - Energy-saving polling mode with connections only when required
-- Live mode with persistent KeyBLE session and immediate manual status changes
+- Live mode with persistent KeyBLE session, 3-minute keepalive and immediate manual status changes
 - Automatic reconnect with bounded backoff in live mode
 - One safe connection/session retry before an operation starts
 - Optional KNX/IP bridge with freely configurable group addresses
@@ -86,8 +86,11 @@ afterwards. The default interval is 10 minutes and can be configured from 1 to
 
 Home Assistant keeps the BLE and KeyBLE session open. Manual changes at the lock
 are reported immediately, and an unexpected disconnect starts an automatic
-reconnect with bounded backoff. The configured interval remains active as an
-additional full status synchronization.
+reconnect with bounded backoff. An independent status keepalive runs after at
+most three idle minutes, matching the proven ESPHome setup and preventing the
+lock's roughly four-minute idle timeout. Any successful command or status
+traffic restarts that keepalive timer. The configured interval remains active
+as an additional full status synchronization.
 
 The Eqiva lock accepts only a limited number of simultaneous Bluetooth
 connections. The official Eqiva app or another KeyBLE client may therefore be
