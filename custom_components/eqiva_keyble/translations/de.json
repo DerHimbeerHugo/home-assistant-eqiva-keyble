@@ -8,10 +8,12 @@
         "data": {
           "name": "Name",
           "key_card": "QR-Code-Daten der Key Card",
-          "connection_mode": "Bluetooth-Verbindungsmodus"
+          "connection_mode": "Bluetooth-Verbindungsmodus",
+          "knx_enabled": "KNX aktivieren"
         },
         "data_description": {
-          "connection_mode": "Energiesparend verbindet nur bei Bedarf. Live hält die BLE-Verbindung offen. Dadurch erreichen Befehle das Schloss ohne erneuten Verbindungsaufbau und manuelle Schlossänderungen erscheinen sofort in Home Assistant."
+          "connection_mode": "Energiesparend verbindet nur bei Bedarf. Live hält die BLE-Verbindung offen. Dadurch erreichen Befehle das Schloss ohne erneuten Verbindungsaufbau und manuelle Schlossänderungen erscheinen sofort in Home Assistant.",
+          "knx_enabled": "Verwendet die bestehende KNX/IP-Verbindung von Home Assistant. Es wird kein zweiter KNX-Tunnel geöffnet. Nach der Einrichtung erscheinen die Gruppenadressen im Abschnitt Konfiguration der Geräteseite."
         }
       }
     },
