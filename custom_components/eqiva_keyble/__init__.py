@@ -38,13 +38,15 @@ from .const import (
     CONNECTION_MODE_LIVE,
     DEFAULT_CONNECTION_MODE,
     DEFAULT_POLL_INTERVAL,
+    DOMAIN,
 )
 from .coordinator import EqivaCoordinator
+from .knx_bridge import EqivaKnxBridge
 from .live_client import EqivaLiveKeyBleClient
 from .protocol import canonical_key
 from .retrying_client import EqivaRetryingKeyBleClient
 
-PLATFORMS = [Platform.LOCK, Platform.SENSOR]
+PLATFORMS = [Platform.LOCK, Platform.SENSOR, Platform.TEXT]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -78,8 +80,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryNotReady(str(err)) from err
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    knx_bridge = EqivaKnxBridge(hass, entry, coordinator)
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = knx_bridge
+    await knx_bridge.async_start()
+    coordinator.async_start_live_keepalive()
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if not unloaded:
+        return False
+
+    if bridge := hass.data.get(DOMAIN, {}).pop(entry.entry_id, None):
+        await bridge.async_stop()
+    coordinator: EqivaCoordinator = entry.runtime_data
+    await coordinator.async_shutdown()
+    return True

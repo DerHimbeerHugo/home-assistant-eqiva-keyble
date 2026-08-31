@@ -15,22 +15,23 @@ from .const import (
     CONF_ADDRESS,
     CONF_CONNECTION_MODE,
     CONF_KEY_CARD,
+    CONF_KNX_ENABLED,
     CONF_NAME,
     CONF_POLL_INTERVAL,
-    CONF_SETUP_METHOD,
     CONF_USER_ID,
     CONF_USER_KEY,
     CONNECTION_MODE_LIVE,
     CONNECTION_MODE_POLLING,
     DEFAULT_CONNECTION_MODE,
+    DEFAULT_KNX_ENABLED,
     DEFAULT_NAME,
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
     MAX_POLL_INTERVAL,
     MIN_POLL_INTERVAL,
-    SETUP_CREDENTIALS,
-    SETUP_KEY_CARD,
+    KNX_ADDRESS_OPTIONS,
 )
+from .knx_address import normalize_knx_group_address
 from .protocol import (
     EqivaConnectionError,
     EqivaHandshakeError,
@@ -38,7 +39,6 @@ from .protocol import (
     EqivaNotFoundError,
     EqivaProtocolError,
     canonical_address,
-    canonical_key,
     parse_key_card,
 )
 
@@ -181,20 +181,8 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return await self.async_step_user()
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        if user_input is not None:
-            if user_input[CONF_SETUP_METHOD] == SETUP_KEY_CARD:
-                return await self.async_step_key_card()
-            return await self.async_step_credentials()
-
-        return self.async_show_form(
-            step_id="user",
-            data_schema=vol.Schema({
-                vol.Required(CONF_SETUP_METHOD, default=SETUP_KEY_CARD): vol.In({
-                    SETUP_KEY_CARD: "Mit Eqiva Key Card koppeln",
-                    SETUP_CREDENTIALS: "Vorhandene KeyBLE-Zugangsdaten verwenden",
-                })
-            }),
-        )
+        """Start every new setup directly with the original Eqiva Key Card."""
+        return await self.async_step_key_card()
 
     async def async_step_key_card(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
@@ -268,139 +256,84 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders=description_placeholders,
         )
 
-    async def async_step_credentials(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        errors: dict[str, str] = {}
-        description_placeholders = {"error": "–"}
-        if user_input is not None:
-            try:
-                address = canonical_address(user_input[CONF_ADDRESS])
-                key = canonical_key(user_input[CONF_USER_KEY])
-                user_id = int(user_input[CONF_USER_ID])
-                if not 0 <= user_id <= 255:
-                    raise ValueError("User-ID muss zwischen 0 und 255 liegen")
-                await self.async_set_unique_id(address.replace(":", "").lower())
-                self._abort_if_unique_id_configured()
-                await _async_ensure_lock_seen(self.hass, address)
-                client = EqivaKeyBleClient(
-                    self.hass, address, user_id=user_id, user_key=key, name=user_input[CONF_NAME]
-                )
-                await client.status()
-                return self.async_create_entry(
-                    title=user_input[CONF_NAME],
-                    data={
-                        CONF_NAME: user_input[CONF_NAME],
-                        CONF_ADDRESS: address,
-                        CONF_USER_ID: user_id,
-                        CONF_USER_KEY: key.hex(),
-                    },
-                    options={
-                        CONF_POLL_INTERVAL: DEFAULT_POLL_INTERVAL,
-                        CONF_CONNECTION_MODE: user_input[CONF_CONNECTION_MODE],
-                    },
-                )
-            except AbortFlow:
-                raise
-            except ValueError as err:
-                errors["base"] = "invalid_credentials"
-                description_placeholders["error"] = str(err)
-            except EqivaNoScannerError as err:
-                _LOGGER.exception("No connectable Home Assistant Bluetooth scanner for Eqiva")
-                errors["base"] = "no_scanner"
-                description_placeholders["error"] = str(err)
-            except EqivaAddressMismatchError as err:
-                _LOGGER.exception("Eqiva advertisement found under a different address")
-                errors["base"] = "address_mismatch"
-                description_placeholders["error"] = str(err)
-            except EqivaNotFoundError as err:
-                _LOGGER.exception("Eqiva lock was not found during credential validation")
-                errors["base"] = "not_found"
-                description_placeholders["error"] = str(err)
-            except EqivaConnectionError as err:
-                _LOGGER.exception("Eqiva Bluetooth/GATT connection failed")
-                errors["base"] = "connection_failed"
-                description_placeholders["error"] = str(err)
-            except EqivaHandshakeError as err:
-                _LOGGER.exception("Eqiva nonce handshake failed")
-                errors["base"] = "handshake_failed"
-                description_placeholders["error"] = str(err)
-            except EqivaProtocolError as err:
-                _LOGGER.exception("Eqiva authentication/protocol validation failed")
-                errors["base"] = "authentication_failed"
-                description_placeholders["error"] = str(err)
-            except Exception as err:  # noqa: BLE001
-                _LOGGER.exception("Unexpected Eqiva credential validation failure")
-                errors["base"] = "cannot_connect"
-                description_placeholders["error"] = f"{type(err).__name__}: {err}"
-
-        address_field = (
-            vol.Required(CONF_ADDRESS, default=self._discovered_address)
-            if self._discovered_address
-            else vol.Required(CONF_ADDRESS)
-        )
-        return self.async_show_form(
-            step_id="credentials",
-            data_schema=vol.Schema({
-                vol.Required(CONF_NAME, default=DEFAULT_NAME): str,
-                address_field: str,
-                vol.Required(CONF_USER_ID): vol.Coerce(int),
-                vol.Required(CONF_USER_KEY): str,
-                vol.Required(
-                    CONF_CONNECTION_MODE,
-                    default=DEFAULT_CONNECTION_MODE,
-                ): _connection_mode_selector(),
-            }),
-            errors=errors,
-            description_placeholders=description_placeholders,
-        )
-
-
 class EqivaKeyBleOptionsFlow(OptionsFlowWithReload):
     """Manage Eqiva runtime options."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Configure polling and Bluetooth connection behaviour."""
+        """Configure Bluetooth and enable the optional KNX bridge."""
         if user_input is not None:
+            poll_interval = int(
+                user_input.get(
+                    CONF_POLL_INTERVAL,
+                    self.config_entry.options.get(
+                        CONF_POLL_INTERVAL,
+                        DEFAULT_POLL_INTERVAL,
+                    ),
+                )
+            )
+            existing_addresses = {
+                option: normalize_knx_group_address(
+                    self.config_entry.options.get(option, "")
+                )
+                for option in KNX_ADDRESS_OPTIONS
+            }
             return self.async_create_entry(
                 title="",
                 data={
-                    CONF_POLL_INTERVAL: int(user_input[CONF_POLL_INTERVAL]),
+                    CONF_POLL_INTERVAL: poll_interval,
                     CONF_CONNECTION_MODE: user_input[CONF_CONNECTION_MODE],
+                    CONF_KNX_ENABLED: bool(user_input[CONF_KNX_ENABLED]),
+                    **existing_addresses,
                 },
             )
 
+        displayed_options = (
+            user_input if user_input is not None else self.config_entry.options
+        )
         current_interval = int(
-            self.config_entry.options.get(
+            displayed_options.get(
                 CONF_POLL_INTERVAL,
                 DEFAULT_POLL_INTERVAL,
             )
         )
         current_mode = str(
-            self.config_entry.options.get(
+            displayed_options.get(
                 CONF_CONNECTION_MODE,
                 DEFAULT_CONNECTION_MODE,
             )
         )
+        current_knx_enabled = bool(
+            displayed_options.get(CONF_KNX_ENABLED, DEFAULT_KNX_ENABLED)
+        )
+        schema: dict[Any, Any] = {
+            vol.Required(
+                CONF_CONNECTION_MODE,
+                default=current_mode,
+            ): _connection_mode_selector(),
+        }
+        if current_mode != CONNECTION_MODE_LIVE:
+            schema[
+                vol.Required(
+                    CONF_POLL_INTERVAL,
+                    default=current_interval,
+                )
+            ] = selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=MIN_POLL_INTERVAL,
+                    max=MAX_POLL_INTERVAL,
+                    step=1,
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            )
+        schema[
+            vol.Required(
+                CONF_KNX_ENABLED,
+                default=current_knx_enabled,
+            )
+        ] = bool
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_CONNECTION_MODE,
-                        default=current_mode,
-                    ): _connection_mode_selector(),
-                    vol.Required(
-                        CONF_POLL_INTERVAL,
-                        default=current_interval,
-                    ): selector.NumberSelector(
-                        selector.NumberSelectorConfig(
-                            min=MIN_POLL_INTERVAL,
-                            max=MAX_POLL_INTERVAL,
-                            step=1,
-                            mode=selector.NumberSelectorMode.BOX,
-                        )
-                    ),
-                }
-            ),
+            data_schema=vol.Schema(schema),
         )

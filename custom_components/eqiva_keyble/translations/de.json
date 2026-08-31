@@ -2,31 +2,12 @@
   "title": "Eqiva Bluetooth Smart Lock",
   "config": {
     "step": {
-      "user": {
-        "title": "Eqiva Türschloss einrichten",
-        "description": "Wähle, wie Home Assistant mit dem Schloss verbunden werden soll.",
-        "data": {"setup_method": "Einrichtungsmethode"}
-      },
       "key_card": {
         "title": "Mit Key Card koppeln",
         "description": "Scanne den QR-Code der Eqiva Key Card. Halte anschließend am Schloss die Entriegeln-Taste gedrückt, bis die gelbe LED blinkt, und klicke dann auf Senden. Die Key-Card-Daten werden nach erfolgreicher Kopplung nicht gespeichert.\n\nTechnische Diagnose: {error}",
         "data": {
           "name": "Name",
           "key_card": "QR-Code-Daten der Key Card",
-          "connection_mode": "Bluetooth-Verbindungsmodus"
-        },
-        "data_description": {
-          "connection_mode": "Energiesparend verbindet nur bei Bedarf. Live hält die BLE-Session offen, damit manuelle Schlossänderungen sofort in Home Assistant erscheinen können."
-        }
-      },
-      "credentials": {
-        "title": "Vorhandene KeyBLE-Zugangsdaten",
-        "description": "Verwende eine bereits registrierte User-ID und den zugehörigen 128-Bit User-Key.\n\nTechnische Diagnose: {error}",
-        "data": {
-          "name": "Name",
-          "address": "Bluetooth-Adresse",
-          "user_id": "User-ID",
-          "user_key": "User-Key",
           "connection_mode": "Bluetooth-Verbindungsmodus"
         },
         "data_description": {
@@ -40,11 +21,9 @@
       "address_mismatch": "Ein Eqiva-Schloss wurde gefunden, aber unter einer anderen Bluetooth-Adresse. Prüfe die MAC-Adresse aus Key Card bzw. ESP-Konfiguration.",
       "invalid_key_card": "Die Key-Card-Daten sind ungültig.",
       "pairing_failed": "Bluetooth und KeyBLE-Verbindungsaufbau funktionieren, aber die Kopplung ist fehlgeschlagen. Prüfe Key Card und Pairing-Modus.",
-      "invalid_credentials": "Bluetooth-Adresse, User-ID oder User-Key sind ungültig.",
       "cannot_connect": "Unerwarteter Fehler beim Zugriff auf das Schloss. Details stehen zusätzlich unten in der technischen Diagnose.",
       "connection_failed": "Bluetooth-Verbindung zum Schloss oder Zugriff auf das Eqiva-GATT-Profil fehlgeschlagen.",
-      "handshake_failed": "Bluetooth-Verbindung steht, aber das Schloss antwortet nicht auf den KeyBLE-Verbindungsaufbau. Schließe die Eqiva-App und stoppe andere KeyBLE-Bridges vorübergehend.",
-      "authentication_failed": "KeyBLE-Verbindung steht, aber die Authentifizierung ist fehlgeschlagen. Prüfe User-ID und User-Key."
+      "handshake_failed": "Bluetooth-Verbindung steht, aber das Schloss antwortet nicht auf den KeyBLE-Verbindungsaufbau. Schließe die Eqiva-App und stoppe andere KeyBLE-Bridges vorübergehend."
     },
     "abort": {
       "already_configured": "Dieses Schloss ist bereits eingerichtet.",
@@ -60,6 +39,14 @@
           "low": "Schwach"
         }
       }
+    },
+    "text": {
+      "knx_lock_address": {"name": "KNX-Gruppenadresse: Abschließen"},
+      "knx_unlock_address": {"name": "KNX-Gruppenadresse: Aufschließen"},
+      "knx_open_address": {"name": "KNX-Gruppenadresse: Tür öffnen"},
+      "knx_locked_state_address": {"name": "KNX-Gruppenadresse: Status abgeschlossen"},
+      "knx_battery_low_address": {"name": "KNX-Gruppenadresse: Batterie schwach"},
+      "knx_available_address": {"name": "KNX-Gruppenadresse: Erreichbarkeit"}
     }
   },
   "selector": {
@@ -70,18 +57,28 @@
       }
     }
   },
+  "exceptions": {
+    "invalid_knx_group_address": {
+      "message": "Ungültige KNX-Gruppenadresse. Beispiele: 1/2/3, 1/123 oder 1234."
+    },
+    "duplicate_knx_group_address": {
+      "message": "Diese KNX-Gruppenadresse wird bereits für eine andere Funktion verwendet."
+    }
+  },
   "options": {
     "step": {
       "init": {
         "title": "Optionen für das Eqiva Türschloss",
-        "description": "Lege Bluetooth-Verbindungsmodus und regelmäßige Vollabfrage des Schlossstatus fest.",
+        "description": "Lege Bluetooth fest und aktiviere optional die Anbindung an die bestehende Home-Assistant-KNX/IP-Integration. Nach der Aktivierung können die Gruppenadressen im Abschnitt Konfiguration der Geräteseite eingetragen werden.",
         "data": {
           "connection_mode": "Bluetooth-Verbindungsmodus",
-          "poll_interval": "Abfrageintervall (Minuten)"
+          "poll_interval": "Abfrageintervall (Minuten)",
+          "knx_enabled": "KNX aktivieren"
         },
         "data_description": {
-          "connection_mode": "Im Live-Modus bleibt die KeyBLE-Verbindung offen, manuelle Schlossänderungen werden sofort übernommen und eine abgerissene Verbindung wird automatisch wieder aufgebaut. Andere Bluetooth-Clients wie die Eqiva-App können währenddessen nicht gleichzeitig verbinden.",
-          "poll_interval": "Zeit zwischen vollständigen Statusabgleichen. Im Energiesparmodus ist dies das normale Polling-Intervall; im Live-Modus dient es zusätzlich als regelmäßiger Resync."
+          "connection_mode": "Im Live-Modus bleibt die KeyBLE-Verbindung offen. Ein automatischer Status-Keepalive spätestens alle 3 Minuten verhindert den Leerlauf-Timeout des Schlosses; manuelle Schlossänderungen werden sofort übernommen und echte Verbindungsabbrüche automatisch wieder aufgebaut. Andere Bluetooth-Clients wie die Eqiva-App können währenddessen nicht gleichzeitig verbinden.",
+          "poll_interval": "Zeit zwischen Statusabgleichen im Energiesparmodus. Im Live-Modus übernimmt ausschließlich der automatische 3-Minuten-Keepalive; deshalb wird diese Option dort ausgeblendet.",
+          "knx_enabled": "Verwendet die bestehende KNX/IP-Verbindung von Home Assistant. Es wird kein zweiter KNX-Tunnel geöffnet. Nach der Aktivierung erscheinen die Gruppenadressen auf der Geräteseite."
         }
       }
     }

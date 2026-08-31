@@ -2,31 +2,12 @@
   "title": "Eqiva Bluetooth Smart Lock",
   "config": {
     "step": {
-      "user": {
-        "title": "Set up Eqiva smart lock",
-        "description": "Choose how Home Assistant should authenticate with the lock.",
-        "data": {"setup_method": "Setup method"}
-      },
       "key_card": {
         "title": "Pair using Key Card",
         "description": "Scan the QR code from the Eqiva Key Card. Then hold the unlock button on the lock until the yellow LED flashes and submit this form. Key Card data is not stored after pairing.\n\nTechnical diagnosis: {error}",
         "data": {
           "name": "Name",
           "key_card": "Key Card QR data",
-          "connection_mode": "Bluetooth connection mode"
-        },
-        "data_description": {
-          "connection_mode": "Energy saving connects only when needed. Live keeps the BLE session open so manual lock changes can be reported immediately."
-        }
-      },
-      "credentials": {
-        "title": "Existing KeyBLE credentials",
-        "description": "Use an already registered user ID and its 128-bit user key.\n\nTechnical diagnosis: {error}",
-        "data": {
-          "name": "Name",
-          "address": "Bluetooth address",
-          "user_id": "User ID",
-          "user_key": "User key",
           "connection_mode": "Bluetooth connection mode"
         },
         "data_description": {
@@ -40,11 +21,9 @@
       "address_mismatch": "An Eqiva lock was found under a different Bluetooth address. Check the MAC address from the Key Card or ESP configuration.",
       "invalid_key_card": "The Key Card data is invalid.",
       "pairing_failed": "Bluetooth and the KeyBLE handshake work, but pairing failed. Check the Key Card and pairing mode.",
-      "invalid_credentials": "The Bluetooth address, user ID, or user key is invalid.",
       "cannot_connect": "Unexpected error while accessing the lock. The technical diagnosis below contains more detail.",
       "connection_failed": "Bluetooth connection to the lock or access to the Eqiva GATT profile failed.",
-      "handshake_failed": "Bluetooth is connected, but the lock did not answer the KeyBLE connection handshake. Close the Eqiva app and temporarily stop other KeyBLE bridges.",
-      "authentication_failed": "The KeyBLE connection works, but authentication failed. Check the user ID and user key."
+      "handshake_failed": "Bluetooth is connected, but the lock did not answer the KeyBLE connection handshake. Close the Eqiva app and temporarily stop other KeyBLE bridges."
     },
     "abort": {
       "already_configured": "This lock is already configured.",
@@ -60,6 +39,14 @@
           "low": "Low"
         }
       }
+    },
+    "text": {
+      "knx_lock_address": {"name": "KNX group address: Lock"},
+      "knx_unlock_address": {"name": "KNX group address: Unlock"},
+      "knx_open_address": {"name": "KNX group address: Open latch"},
+      "knx_locked_state_address": {"name": "KNX group address: Locked status"},
+      "knx_battery_low_address": {"name": "KNX group address: Battery low"},
+      "knx_available_address": {"name": "KNX group address: Availability"}
     }
   },
   "selector": {
@@ -70,18 +57,28 @@
       }
     }
   },
+  "exceptions": {
+    "invalid_knx_group_address": {
+      "message": "Invalid KNX group address. Examples: 1/2/3, 1/123 or 1234."
+    },
+    "duplicate_knx_group_address": {
+      "message": "This KNX group address is already assigned to another function."
+    }
+  },
   "options": {
     "step": {
       "init": {
         "title": "Eqiva lock options",
-        "description": "Configure the Bluetooth connection and how often Home Assistant performs a full status synchronization.",
+        "description": "Configure Bluetooth and enable the optional connection to the existing Home Assistant KNX/IP integration. After KNX is enabled, group addresses can be edited in the Configuration section of the device page.",
         "data": {
           "connection_mode": "Bluetooth connection mode",
-          "poll_interval": "Polling interval (minutes)"
+          "poll_interval": "Polling interval (minutes)",
+          "knx_enabled": "Enable KNX"
         },
         "data_description": {
-          "connection_mode": "Live mode keeps the KeyBLE connection open, reports manual lock changes immediately and reconnects automatically if the link drops. Other Bluetooth clients such as the Eqiva app cannot connect at the same time.",
-          "poll_interval": "Time between full status synchronizations. In energy-saving mode this is the normal polling interval; in live mode it acts as an additional resync interval."
+          "connection_mode": "Live mode keeps the KeyBLE connection open. An automatic status keepalive at least every 3 minutes prevents the lock's idle timeout; manual changes are reported immediately and genuine disconnects are reconnected automatically. Other Bluetooth clients such as the Eqiva app cannot connect at the same time.",
+          "poll_interval": "Time between status synchronizations in energy-saving mode. Live mode uses only the automatic 3-minute keepalive, so this option is hidden there.",
+          "knx_enabled": "Uses Home Assistant's existing KNX/IP connection. No second KNX tunnel is opened. Group addresses appear on the device page after enabling KNX."
         }
       }
     }
