@@ -107,7 +107,7 @@ Enter only the addresses you need. Free-level, two-level and three-level KNX
 group-address formats are accepted. Existing addresses entered with v0.3.0b1
 are retained automatically.
 
-All KNX objects use DPT 1. Lock, unlock and open-latch commands have separate
+All KNX objects use DPT 1.001. Lock, unlock and open-latch commands have separate
 addresses and react only to an incoming value `1`; value `0`, responses and
 outgoing telegrams are ignored. Optional status addresses report locked,
 battery-low and availability states and answer GroupValueRead requests.
@@ -121,6 +121,14 @@ required by this integration.
 
 Close the official Eqiva app and stop other KeyBLE bridges while pairing or when
 diagnosing connection problems.
+
+## What's new in v0.3.1
+
+- Register configured KNX event addresses explicitly with DPT 1.001
+- Supply the required `remove: false` flag during KNX event registration
+- Send all KNX command and status objects consistently as DPT 1.001
+- Add focused debug output for KNX registration and received Eqiva telegrams
+- Clarify Key Card entry and the latency benefit of live mode during setup
 
 ## What's new in v0.3.0
 

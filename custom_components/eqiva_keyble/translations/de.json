@@ -4,14 +4,14 @@
     "step": {
       "key_card": {
         "title": "Mit Key Card koppeln",
-        "description": "Scanne den QR-Code der Eqiva Key Card. Halte anschließend am Schloss die Entriegeln-Taste gedrückt, bis die gelbe LED blinkt, und klicke dann auf Senden. Die Key-Card-Daten werden nach erfolgreicher Kopplung nicht gespeichert.\n\nTechnische Diagnose: {error}",
+        "description": "Scanne den QR-Code der Eqiva Key Card mit einem QR-Code-Scanner und kopiere den vollständigen Inhalt in das Feld unten. Halte anschließend am Schloss die Entriegeln-Taste gedrückt, bis die gelbe LED blinkt, und bestätige mit OK. Die QR-Code-Daten werden nach erfolgreicher Kopplung nicht gespeichert.\n\nTechnische Diagnose: {error}",
         "data": {
           "name": "Name",
           "key_card": "QR-Code-Daten der Key Card",
           "connection_mode": "Bluetooth-Verbindungsmodus"
         },
         "data_description": {
-          "connection_mode": "Energiesparend verbindet nur bei Bedarf. Live hält die BLE-Session offen, damit manuelle Schlossänderungen sofort in Home Assistant erscheinen können."
+          "connection_mode": "Energiesparend verbindet nur bei Bedarf. Live hält die BLE-Verbindung offen. Dadurch erreichen Befehle das Schloss ohne erneuten Verbindungsaufbau und manuelle Schlossänderungen erscheinen sofort in Home Assistant."
         }
       }
     },

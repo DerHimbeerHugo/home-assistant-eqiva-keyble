@@ -4,14 +4,14 @@
     "step": {
       "key_card": {
         "title": "Pair using Key Card",
-        "description": "Scan the QR code from the Eqiva Key Card. Then hold the unlock button on the lock until the yellow LED flashes and submit this form. Key Card data is not stored after pairing.\n\nTechnical diagnosis: {error}",
+        "description": "Scan the QR code on the Eqiva Key Card with a QR code scanner and paste the complete result into the field below. Then hold the unlock button on the lock until the yellow LED flashes and confirm with OK. The QR code data is not stored after successful pairing.\n\nTechnical diagnosis: {error}",
         "data": {
           "name": "Name",
           "key_card": "Key Card QR data",
           "connection_mode": "Bluetooth connection mode"
         },
         "data_description": {
-          "connection_mode": "Energy saving connects only when needed. Live keeps the BLE session open so manual lock changes can be reported immediately."
+          "connection_mode": "Energy saving connects only when needed. Live keeps the BLE connection open, so commands reach the lock without reconnecting and manual lock changes can be reported immediately in Home Assistant."
         }
       }
     },
