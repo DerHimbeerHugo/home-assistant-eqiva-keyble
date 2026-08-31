@@ -26,6 +26,7 @@ _KNX_DOMAIN = "knx"
 _KNX_EVENT = "knx_event"
 _KNX_EVENT_REGISTER = "event_register"
 _KNX_SEND = "send"
+_KNX_DPT_SWITCH = "1.001"
 
 
 class EqivaKnxBridge:
@@ -95,7 +96,11 @@ class EqivaKnxBridge:
             await self.hass.services.async_call(
                 _KNX_DOMAIN,
                 _KNX_EVENT_REGISTER,
-                {"address": registered, "type": "binary"},
+                {
+                    "address": registered,
+                    "type": _KNX_DPT_SWITCH,
+                    "remove": False,
+                },
                 blocking=True,
             )
         except Exception:  # noqa: BLE001
@@ -111,8 +116,10 @@ class EqivaKnxBridge:
         )
         self._started = True
         _LOGGER.info(
-            "Eqiva KNX bridge registered %d group address(es)",
+            "Eqiva KNX bridge registered %d group address(es) with DPT %s: %s",
             len(registered),
+            _KNX_DPT_SWITCH,
+            ", ".join(registered),
         )
         await self._async_publish_all(force=True)
 
@@ -161,6 +168,20 @@ class EqivaKnxBridge:
 
         destination = str(data.get("destination", ""))
         telegram_type = data.get("telegramtype")
+        if (
+            destination not in self._commands
+            and destination not in self._status_options
+        ):
+            return
+
+        _LOGGER.debug(
+            "Eqiva KNX telegram received: destination=%s, type=%s, "
+            "value=%r, data=%r",
+            destination,
+            telegram_type,
+            data.get("value"),
+            data.get("data"),
+        )
 
         if telegram_type == "GroupValueRead" and destination in self._status_options:
             self.hass.async_create_task(
@@ -245,7 +266,7 @@ class EqivaKnxBridge:
                 _KNX_SEND,
                 {
                     "address": address,
-                    "type": "binary",
+                    "type": _KNX_DPT_SWITCH,
                     "payload": value,
                     "response": response,
                 },
