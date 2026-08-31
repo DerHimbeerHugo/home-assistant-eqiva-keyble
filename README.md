@@ -20,7 +20,6 @@ service or cloud account is required.
 - Native Home Assistant Bluetooth integration
 - Setup through the Home Assistant UI
 - Pairing with the original Eqiva Key Card
-- Optional setup with an existing KeyBLE user ID and 128-bit user key
 - Native `lock` entity with lock, unlock and open-latch commands
 - Immediate locking, unlocking and opening transition states
 - Translated battery status sensor (`OK` / `Low`, `i.O.` / `Schwach`)
@@ -61,7 +60,7 @@ The QR code on the original Key Card contains the Bluetooth address and card key
 needed to register a new user on the lock.
 
 
-1. Start the integration setup and choose **Mit Eqiva Key Card koppeln**.
+1. Start the integration setup; the Key Card form opens directly.
 2. Enter a name and the complete QR-code data locally in Home Assistant.
 3. Hold the **unlock** button on the lock until the yellow LED flashes.
 4. Submit the form.
@@ -98,7 +97,7 @@ connections. The official Eqiva app or another KeyBLE client may therefore be
 unable to connect while live mode is active. Live mode can also increase battery
 usage compared with energy-saving mode.
 
-## KNX/IP bridge (v0.3 beta)
+## KNX/IP bridge
 
 The optional KNX bridge uses Home Assistant's existing KNX/IP connection; it
 does not open a second tunnel. Enable it under **Settings → Devices & services →
@@ -123,16 +122,15 @@ required by this integration.
 Close the official Eqiva app and stop other KeyBLE bridges while pairing or when
 diagnosing connection problems.
 
-## What's new in v0.2.0
+## What's new in v0.3.0
 
-- Selectable energy-saving and live connection modes
-- Configurable 1–60 minute synchronization interval
-- Persistent live session with push updates and automatic reconnect
-- Safe two-attempt session preparation synchronized to fresh advertisements
-- 15-second raw L2CAP connection timeout
-- Immediate transition states for lock commands
-- Battery status sensor replacing the two legacy diagnostic binary sensors
-- Existing v0.1.x configuration entries migrate without being recreated
+- Optional KNX/IP bridge using Home Assistant's existing KNX connection
+- Six freely configurable DPT 1 command and status group addresses on the device page
+- GroupValueRead responses for configured KNX status objects
+- Automatic 3-minute keepalive and reconnect for persistent live sessions
+- No redundant polling interval in live mode; energy-saving polling remains configurable
+- New installations start directly with the original Key Card QR code
+- Existing configuration entries upgrade without being recreated
 
 ## Protocol / credits
 
