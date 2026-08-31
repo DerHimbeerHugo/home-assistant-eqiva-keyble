@@ -62,8 +62,9 @@ needed to register a new user on the lock.
 
 1. Start the integration setup; the Key Card form opens directly.
 2. Enter a name and the complete QR-code data locally in Home Assistant.
-3. Hold the **unlock** button on the lock until the yellow LED flashes.
-4. Submit the form.
+3. Select the Bluetooth connection mode and optionally enable KNX.
+4. Hold the **unlock** button on the lock until the yellow LED flashes.
+5. Submit the form.
 
 
 The Key Card data itself is not persisted after successful pairing. The newly
@@ -100,9 +101,10 @@ usage compared with energy-saving mode.
 ## KNX/IP bridge
 
 The optional KNX bridge uses Home Assistant's existing KNX/IP connection; it
-does not open a second tunnel. Enable it under **Settings → Devices & services →
-Eqiva Bluetooth Smart Lock → Configure**. Home Assistant then adds editable KNX
-group-address fields to the **Configuration** section of the lock's device page.
+does not open a second tunnel. Enable it directly during initial setup or later
+under **Settings → Devices & services → Eqiva Bluetooth Smart Lock → Configure**.
+Home Assistant then adds editable KNX group-address fields to the
+**Configuration** section of the lock's device page.
 Enter only the addresses you need. Free-level, two-level and three-level KNX
 group-address formats are accepted. Existing addresses entered with v0.3.0b1
 are retained automatically.
@@ -121,6 +123,12 @@ required by this integration.
 
 Close the official Eqiva app and stop other KeyBLE bridges while pairing or when
 diagnosing connection problems.
+
+## What's new in v0.3.2
+
+- Allow KNX to be enabled directly during initial Key Card setup
+- Preserve the selected KNX state in the newly created configuration entry
+- Include the clarified QR-code, OK-button and live-mode guidance in a new release
 
 ## What's new in v0.3.1
 

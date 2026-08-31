@@ -206,6 +206,7 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     options={
                         CONF_POLL_INTERVAL: DEFAULT_POLL_INTERVAL,
                         CONF_CONNECTION_MODE: user_input[CONF_CONNECTION_MODE],
+                        CONF_KNX_ENABLED: bool(user_input[CONF_KNX_ENABLED]),
                     },
                 )
             except AbortFlow:
@@ -251,6 +252,10 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_CONNECTION_MODE,
                     default=DEFAULT_CONNECTION_MODE,
                 ): _connection_mode_selector(),
+                vol.Required(
+                    CONF_KNX_ENABLED,
+                    default=DEFAULT_KNX_ENABLED,
+                ): bool,
             }),
             errors=errors,
             description_placeholders=description_placeholders,
