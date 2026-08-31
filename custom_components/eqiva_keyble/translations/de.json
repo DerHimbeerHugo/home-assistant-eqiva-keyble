@@ -2,31 +2,12 @@
   "title": "Eqiva Bluetooth Smart Lock",
   "config": {
     "step": {
-      "user": {
-        "title": "Eqiva Türschloss einrichten",
-        "description": "Wähle, wie Home Assistant mit dem Schloss verbunden werden soll.",
-        "data": {"setup_method": "Einrichtungsmethode"}
-      },
       "key_card": {
         "title": "Mit Key Card koppeln",
         "description": "Scanne den QR-Code der Eqiva Key Card. Halte anschließend am Schloss die Entriegeln-Taste gedrückt, bis die gelbe LED blinkt, und klicke dann auf Senden. Die Key-Card-Daten werden nach erfolgreicher Kopplung nicht gespeichert.\n\nTechnische Diagnose: {error}",
         "data": {
           "name": "Name",
           "key_card": "QR-Code-Daten der Key Card",
-          "connection_mode": "Bluetooth-Verbindungsmodus"
-        },
-        "data_description": {
-          "connection_mode": "Energiesparend verbindet nur bei Bedarf. Live hält die BLE-Session offen, damit manuelle Schlossänderungen sofort in Home Assistant erscheinen können."
-        }
-      },
-      "credentials": {
-        "title": "Vorhandene KeyBLE-Zugangsdaten",
-        "description": "Verwende eine bereits registrierte User-ID und den zugehörigen 128-Bit User-Key.\n\nTechnische Diagnose: {error}",
-        "data": {
-          "name": "Name",
-          "address": "Bluetooth-Adresse",
-          "user_id": "User-ID",
-          "user_key": "User-Key",
           "connection_mode": "Bluetooth-Verbindungsmodus"
         },
         "data_description": {
@@ -40,11 +21,9 @@
       "address_mismatch": "Ein Eqiva-Schloss wurde gefunden, aber unter einer anderen Bluetooth-Adresse. Prüfe die MAC-Adresse aus Key Card bzw. ESP-Konfiguration.",
       "invalid_key_card": "Die Key-Card-Daten sind ungültig.",
       "pairing_failed": "Bluetooth und KeyBLE-Verbindungsaufbau funktionieren, aber die Kopplung ist fehlgeschlagen. Prüfe Key Card und Pairing-Modus.",
-      "invalid_credentials": "Bluetooth-Adresse, User-ID oder User-Key sind ungültig.",
       "cannot_connect": "Unerwarteter Fehler beim Zugriff auf das Schloss. Details stehen zusätzlich unten in der technischen Diagnose.",
       "connection_failed": "Bluetooth-Verbindung zum Schloss oder Zugriff auf das Eqiva-GATT-Profil fehlgeschlagen.",
-      "handshake_failed": "Bluetooth-Verbindung steht, aber das Schloss antwortet nicht auf den KeyBLE-Verbindungsaufbau. Schließe die Eqiva-App und stoppe andere KeyBLE-Bridges vorübergehend.",
-      "authentication_failed": "KeyBLE-Verbindung steht, aber die Authentifizierung ist fehlgeschlagen. Prüfe User-ID und User-Key."
+      "handshake_failed": "Bluetooth-Verbindung steht, aber das Schloss antwortet nicht auf den KeyBLE-Verbindungsaufbau. Schließe die Eqiva-App und stoppe andere KeyBLE-Bridges vorübergehend."
     },
     "abort": {
       "already_configured": "Dieses Schloss ist bereits eingerichtet.",
