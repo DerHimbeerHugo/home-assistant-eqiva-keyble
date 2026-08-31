@@ -8,10 +8,12 @@
         "data": {
           "name": "Name",
           "key_card": "Key Card QR data",
-          "connection_mode": "Bluetooth connection mode"
+          "connection_mode": "Bluetooth connection mode",
+          "knx_enabled": "Enable KNX"
         },
         "data_description": {
-          "connection_mode": "Energy saving connects only when needed. Live keeps the BLE connection open, so commands reach the lock without reconnecting and manual lock changes can be reported immediately in Home Assistant."
+          "connection_mode": "Energy saving connects only when needed. Live keeps the BLE connection open, so commands reach the lock without reconnecting and manual lock changes can be reported immediately in Home Assistant.",
+          "knx_enabled": "Uses Home Assistant's existing KNX/IP connection. No second KNX tunnel is opened. The group-address fields appear in the Configuration section of the device page after setup."
         }
       }
     },
