@@ -18,6 +18,7 @@ from .const import (
     CONF_KNX_ENABLED,
     CONF_NAME,
     CONF_POLL_INTERVAL,
+    CONF_TRANSPORT,
     CONF_USER_ID,
     CONF_USER_KEY,
     CONNECTION_MODE_LIVE,
@@ -26,10 +27,13 @@ from .const import (
     DEFAULT_KNX_ENABLED,
     DEFAULT_NAME,
     DEFAULT_POLL_INTERVAL,
+    DEFAULT_TRANSPORT,
     DOMAIN,
     MAX_POLL_INTERVAL,
     MIN_POLL_INTERVAL,
     KNX_ADDRESS_OPTIONS,
+    TRANSPORT_HA_GATT,
+    TRANSPORT_RAW_ATT,
 )
 from .knx_address import normalize_knx_group_address
 from .protocol import (
@@ -41,6 +45,7 @@ from .protocol import (
     canonical_address,
     parse_key_card,
 )
+from .transport_factory import create_transport
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -61,6 +66,19 @@ def _connection_mode_selector() -> selector.SelectSelector:
             options=[CONNECTION_MODE_POLLING, CONNECTION_MODE_LIVE],
             mode=selector.SelectSelectorMode.DROPDOWN,
             translation_key="connection_mode",
+        )
+    )
+
+
+def _transport_selector() -> selector.SelectSelector:
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=[
+                TRANSPORT_RAW_ATT,
+                TRANSPORT_HA_GATT,
+            ],
+            mode=selector.SelectSelectorMode.DROPDOWN,
+            translation_key="transport",
         )
     )
 
@@ -193,7 +211,20 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(card.address.replace(":", "").lower())
                 self._abort_if_unique_id_configured()
                 await _async_ensure_lock_seen(self.hass, card.address)
-                client = EqivaKeyBleClient(self.hass, card.address, name=user_input[CONF_NAME])
+                requested_transport = str(user_input[CONF_TRANSPORT])
+                transport = create_transport(
+                    self.hass,
+                    card.address,
+                    user_input[CONF_NAME],
+                    requested_transport,
+                )
+                client = EqivaKeyBleClient(
+                    self.hass,
+                    card.address,
+                    name=user_input[CONF_NAME],
+                    transport=transport,
+                    requested_transport=requested_transport,
+                )
                 user_id, user_key = await client.pair(card.key)
                 return self.async_create_entry(
                     title=user_input[CONF_NAME],
@@ -206,6 +237,7 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     options={
                         CONF_POLL_INTERVAL: DEFAULT_POLL_INTERVAL,
                         CONF_CONNECTION_MODE: user_input[CONF_CONNECTION_MODE],
+                        CONF_TRANSPORT: requested_transport,
                         CONF_KNX_ENABLED: bool(user_input[CONF_KNX_ENABLED]),
                     },
                 )
@@ -253,6 +285,10 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     default=DEFAULT_CONNECTION_MODE,
                 ): _connection_mode_selector(),
                 vol.Required(
+                    CONF_TRANSPORT,
+                    default=DEFAULT_TRANSPORT,
+                ): _transport_selector(),
+                vol.Required(
                     CONF_KNX_ENABLED,
                     default=DEFAULT_KNX_ENABLED,
                 ): bool,
@@ -289,6 +325,7 @@ class EqivaKeyBleOptionsFlow(OptionsFlowWithReload):
                 data={
                     CONF_POLL_INTERVAL: poll_interval,
                     CONF_CONNECTION_MODE: user_input[CONF_CONNECTION_MODE],
+                    CONF_TRANSPORT: user_input[CONF_TRANSPORT],
                     CONF_KNX_ENABLED: bool(user_input[CONF_KNX_ENABLED]),
                     **existing_addresses,
                 },
@@ -309,10 +346,20 @@ class EqivaKeyBleOptionsFlow(OptionsFlowWithReload):
                 DEFAULT_CONNECTION_MODE,
             )
         )
+        current_transport = str(
+            displayed_options.get(
+                CONF_TRANSPORT,
+                DEFAULT_TRANSPORT,
+            )
+        )
         current_knx_enabled = bool(
             displayed_options.get(CONF_KNX_ENABLED, DEFAULT_KNX_ENABLED)
         )
         schema: dict[Any, Any] = {
+            vol.Required(
+                CONF_TRANSPORT,
+                default=current_transport,
+            ): _transport_selector(),
             vol.Required(
                 CONF_CONNECTION_MODE,
                 default=current_mode,

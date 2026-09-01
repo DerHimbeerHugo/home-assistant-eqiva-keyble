@@ -76,9 +76,7 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
             if self._last_poll_finished is not None
             else None
         )
-        client_connected = bool(
-            self.client._client is not None and self.client._client.is_connected
-        )
+        client_connected = self.client.is_connected
 
         _LOGGER.debug(
             "Eqiva %s: %s poll=%d START "
@@ -213,7 +211,7 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
                         err,
                         exc_info=True,
                     )
-                    # A client-side abort is intentionally hidden from the raw
+                    # A client-side abort is intentionally hidden from the
                     # transport's disconnect callback. Explicitly hand the
                     # failed keepalive to the coordinator reconnect loop too.
                     self._handle_live_disconnect()
