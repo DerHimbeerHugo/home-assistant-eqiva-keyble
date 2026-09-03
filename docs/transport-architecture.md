@@ -107,18 +107,28 @@ sent.
 
 ## Transport selection
 
+The runtime always receives one concrete transport before a KeyBLE session
+starts.
+
 | Requested value | Resolution |
 |---|---|
+| `auto` | During new pairing: Raw ATT if the currently visible lock has a usable local hci path, otherwise HA GATT |
 | `raw_att` | Always Raw ATT; requires a usable local Linux/hci path |
 | `ha_gatt` | Always HA GATT; never falls back to Raw ATT |
 
-Selection happens before connecting. A connection error never changes the
-selected transport. The selected transport is included in the debug log.
+For new setups, `auto` is the recommended default. Pairing first ensures Home
+Assistant has a current connectable scanner path, then resolves Auto and stores
+the resulting explicit `raw_att` or `ha_gatt` value in the config entry. Auto is
+therefore not re-evaluated for every later command.
 
-Existing config entries have no transport option. They resolve to `raw_att`, so
-no config-entry migration is required for the current explicit-selection beta.
-Automatic selection can be added later without changing the command safety
-boundary.
+Existing config entries that do not yet contain a transport option still resolve
+to `raw_att`, preserving their historical local behavior. The options flow keeps
+explicit Raw ATT / HA GATT selection available for troubleshooting or manual
+migration.
+
+A connection error never changes the selected transport. This is important for
+motor-command safety: an ambiguous command write must never be repeated on a
+second Bluetooth path.
 
 ## Historical patch inventory
 

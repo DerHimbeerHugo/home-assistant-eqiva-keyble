@@ -4,12 +4,13 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from enum import StrEnum
 
-from .const import TRANSPORT_HA_GATT, TRANSPORT_RAW_ATT
+from .const import TRANSPORT_AUTO, TRANSPORT_HA_GATT, TRANSPORT_RAW_ATT
 
 
 class TransportType(StrEnum):
     """Selectable Eqiva Bluetooth transports."""
 
+    AUTO = TRANSPORT_AUTO
     RAW_ATT = TRANSPORT_RAW_ATT
     HA_GATT = TRANSPORT_HA_GATT
 
@@ -57,8 +58,35 @@ class EqivaTransport(ABC):
 
 
 def parse_transport_type(requested: str) -> TransportType:
-    """Validate an explicit transport choice without fallback or auto-selection."""
+    """Validate a configured transport value."""
     try:
         return TransportType(requested)
     except ValueError as err:
         raise ValueError(f"Unbekannter Eqiva-Transport: {requested}") from err
+
+
+def resolve_transport_type(
+    requested: str | TransportType,
+    *,
+    local_raw_available: bool,
+) -> TransportType:
+    """Resolve Auto before any KeyBLE session or motor command starts.
+
+    Auto conservatively keeps the proven Raw-ATT implementation whenever the
+    lock currently has a usable local hci path. Otherwise Home Assistant GATT
+    is selected so an ESPHome Bluetooth Proxy can be used. The result is one
+    explicit transport; connection failures never trigger cross-transport
+    fallback.
+    """
+    selected = (
+        requested
+        if isinstance(requested, TransportType)
+        else parse_transport_type(requested)
+    )
+    if selected is not TransportType.AUTO:
+        return selected
+    return (
+        TransportType.RAW_ATT
+        if local_raw_available
+        else TransportType.HA_GATT
+    )

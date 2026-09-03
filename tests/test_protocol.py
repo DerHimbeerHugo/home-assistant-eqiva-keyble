@@ -29,6 +29,7 @@ from custom_components.eqiva_keyble.transport import (
     NotificationCallback,
     TransportType,
     parse_transport_type,
+    resolve_transport_type,
 )
 
 
@@ -267,17 +268,36 @@ async def test_motor_command_is_not_repeated_after_ambiguous_write(
 @pytest.mark.parametrize(
     ("requested", "expected"),
     [
+        ("auto", TransportType.AUTO),
         ("raw_att", TransportType.RAW_ATT),
         ("ha_gatt", TransportType.HA_GATT),
     ],
 )
-def test_transport_selection_has_no_explicit_fallback(
+def test_transport_type_parsing(
     requested: str,
     expected: TransportType,
 ) -> None:
     assert parse_transport_type(requested) is expected
 
 
-def test_transport_selection_rejects_auto() -> None:
-    with pytest.raises(ValueError, match="Unbekannter Eqiva-Transport"):
-        parse_transport_type("auto")
+@pytest.mark.parametrize(
+    ("requested", "local_raw_available", "expected"),
+    [
+        ("auto", True, TransportType.RAW_ATT),
+        ("auto", False, TransportType.HA_GATT),
+        ("raw_att", False, TransportType.RAW_ATT),
+        ("ha_gatt", True, TransportType.HA_GATT),
+    ],
+)
+def test_transport_resolution_has_no_cross_transport_fallback(
+    requested: str,
+    local_raw_available: bool,
+    expected: TransportType,
+) -> None:
+    assert (
+        resolve_transport_type(
+            requested,
+            local_raw_available=local_raw_available,
+        )
+        is expected
+    )

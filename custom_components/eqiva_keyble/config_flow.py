@@ -27,11 +27,13 @@ from .const import (
     DEFAULT_KNX_ENABLED,
     DEFAULT_NAME,
     DEFAULT_POLL_INTERVAL,
+    DEFAULT_SETUP_TRANSPORT,
     DEFAULT_TRANSPORT,
     DOMAIN,
     MAX_POLL_INTERVAL,
     MIN_POLL_INTERVAL,
     KNX_ADDRESS_OPTIONS,
+    TRANSPORT_AUTO,
     TRANSPORT_HA_GATT,
     TRANSPORT_RAW_ATT,
 )
@@ -70,13 +72,13 @@ def _connection_mode_selector() -> selector.SelectSelector:
     )
 
 
-def _transport_selector() -> selector.SelectSelector:
+def _transport_selector(*, include_auto: bool = False) -> selector.SelectSelector:
+    options = [TRANSPORT_RAW_ATT, TRANSPORT_HA_GATT]
+    if include_auto:
+        options.insert(0, TRANSPORT_AUTO)
     return selector.SelectSelector(
         selector.SelectSelectorConfig(
-            options=[
-                TRANSPORT_RAW_ATT,
-                TRANSPORT_HA_GATT,
-            ],
+            options=options,
             mode=selector.SelectSelectorMode.DROPDOWN,
             translation_key="transport",
         )
@@ -218,12 +220,13 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     user_input[CONF_NAME],
                     requested_transport,
                 )
+                resolved_transport = str(transport.kind)
                 client = EqivaKeyBleClient(
                     self.hass,
                     card.address,
                     name=user_input[CONF_NAME],
                     transport=transport,
-                    requested_transport=requested_transport,
+                    requested_transport=resolved_transport,
                 )
                 user_id, user_key = await client.pair(card.key)
                 return self.async_create_entry(
@@ -237,7 +240,9 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     options={
                         CONF_POLL_INTERVAL: DEFAULT_POLL_INTERVAL,
                         CONF_CONNECTION_MODE: user_input[CONF_CONNECTION_MODE],
-                        CONF_TRANSPORT: requested_transport,
+                        # Auto is intentionally resolved while a current scanner
+                        # path is known, then persisted as an explicit transport.
+                        CONF_TRANSPORT: resolved_transport,
                         CONF_KNX_ENABLED: bool(user_input[CONF_KNX_ENABLED]),
                     },
                 )
@@ -286,8 +291,8 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ): _connection_mode_selector(),
                 vol.Required(
                     CONF_TRANSPORT,
-                    default=DEFAULT_TRANSPORT,
-                ): _transport_selector(),
+                    default=DEFAULT_SETUP_TRANSPORT,
+                ): _transport_selector(include_auto=True),
                 vol.Required(
                     CONF_KNX_ENABLED,
                     default=DEFAULT_KNX_ENABLED,
@@ -296,6 +301,7 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
             description_placeholders=description_placeholders,
         )
+
 
 class EqivaKeyBleOptionsFlow(OptionsFlowWithReload):
     """Manage Eqiva runtime options."""

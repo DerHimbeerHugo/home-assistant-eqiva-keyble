@@ -20,6 +20,7 @@ CONF_KNX_AVAILABLE_ADDRESS = "knx_available_address"
 CONNECTION_MODE_POLLING = "polling"
 CONNECTION_MODE_LIVE = "live"
 
+TRANSPORT_AUTO = "auto"
 TRANSPORT_RAW_ATT = "raw_att"
 TRANSPORT_HA_GATT = "ha_gatt"
 
@@ -28,7 +29,12 @@ DEFAULT_POLL_INTERVAL = 10
 MIN_POLL_INTERVAL = 1
 MAX_POLL_INTERVAL = 60
 DEFAULT_CONNECTION_MODE = CONNECTION_MODE_POLLING
+# Missing transport options on existing entries intentionally keep the
+# historical local Raw-ATT behavior.
 DEFAULT_TRANSPORT = TRANSPORT_RAW_ATT
+# New pairing flows may choose a transport automatically while the lock is
+# currently visible. The resolved explicit transport is stored in the entry.
+DEFAULT_SETUP_TRANSPORT = TRANSPORT_AUTO
 DEFAULT_KNX_ENABLED = False
 
 KNX_ADDRESS_OPTIONS = (
