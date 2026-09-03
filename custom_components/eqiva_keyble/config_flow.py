@@ -31,7 +31,6 @@ from .const import (
     MAX_POLL_INTERVAL,
     MIN_POLL_INTERVAL,
 )
-from .ha_gatt_transport import HomeAssistantGattTransport
 from .knx_address import normalize_knx_group_address
 from .protocol import (
     EqivaConnectionError,
@@ -42,6 +41,7 @@ from .protocol import (
     canonical_address,
     parse_key_card,
 )
+from .transport_factory import create_transport
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -198,7 +198,7 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(card.address.replace(":", "").lower())
                 self._abort_if_unique_id_configured()
                 await _async_ensure_lock_seen(self.hass, card.address)
-                transport = HomeAssistantGattTransport(
+                transport = create_transport(
                     self.hass,
                     card.address,
                     user_input[CONF_NAME],
