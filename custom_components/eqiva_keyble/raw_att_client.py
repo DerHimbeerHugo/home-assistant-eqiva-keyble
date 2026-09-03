@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from bleak import BleakError
 from bleak.backends.characteristic import BleakGATTCharacteristic
 from bleak.backends.descriptor import BleakGATTDescriptor
-from habluetooth.channels.att import ATTClient, CCCD_UUID
+from habluetooth.channels.att import CCCD_UUID, ATTClient
 from habluetooth.channels.l2cap import (
     BT_SECURITY_LOW,
     BT_SECURITY_MEDIUM,
@@ -20,6 +21,7 @@ _LOGGER = logging.getLogger(__name__)
 _CCCD_NOTIFY = b"\x01\x00"
 _CCCD_INDICATE = b"\x02\x00"
 _CCCD_OFF = b"\x00\x00"
+_ATT_WRITE_REQUEST = 0x12
 
 
 class EqivaRawATTClient(HaMgmtClient):
@@ -39,9 +41,7 @@ class EqivaRawATTClient(HaMgmtClient):
                 req_opcode = data[1]
                 handle = int.from_bytes(data[2:4], "little")
                 error_code = data[4]
-                summary += (
-                    f"(req=0x{req_opcode:02x},handle=0x{handle:04x},err=0x{error_code:02x})"
-                )
+                summary += f"(req=0x{req_opcode:02x},handle=0x{handle:04x},err=0x{error_code:02x})"
             summary += f"[{len(data)}]"
 
         trace = getattr(self, "_eqiva_att_trace", None)
@@ -77,11 +77,6 @@ class EqivaRawATTClient(HaMgmtClient):
             raise BleakError("already connected")
 
         self._eqiva_att_trace: list[str] = []
-        # Eqiva v25 deliberately disables ATTClient's synchronous security retry.
-        # On ATT 0x05 habluetooth normally raises BT_SECURITY and immediately
-        # re-issues the request. The kernel security procedure is asynchronous,
-        # so that retry can race the LE encryption/authentication setup. We
-        # instead raise link security explicitly after the KeyBLE nonce exchange.
         att = ATTClient(
             send=self._send_traced_pdu,
             on_disconnect=self._handle_disconnect,
@@ -180,8 +175,34 @@ class EqivaRawATTClient(HaMgmtClient):
         characteristic: BleakGATTCharacteristic,
         callback: Callable[[bytearray], None],
     ) -> None:
+        """Install the v29 local handler before any CCCD write is attempted."""
         self._notification_cccd(characteristic)
-        self._codec().set_notify_handler(characteristic.handle, callback)
+        self._eqiva_seen_notification = False
+        self._eqiva_notify_mode = "local-only-wait"
+
+        def _observed_callback(data: bytearray) -> None:
+            if not self._eqiva_seen_notification:
+                self._eqiva_seen_notification = True
+                if self._eqiva_notify_mode == "local-only-wait":
+                    self._eqiva_notify_mode = "local-only-success"
+                    self._trace_note("NOTIFY:rx-before-cccd-command")
+            callback(data)
+
+        descriptors = getattr(characteristic, "descriptors", None) or []
+        descriptor_text = (
+            ",".join(
+                f"0x{descriptor.handle:04x}:{descriptor.uuid}"
+                for descriptor in descriptors
+            )
+            or "none"
+        )
+        properties = ",".join(sorted(characteristic.properties))
+        self._eqiva_gatt_profile = (
+            f"rx_handle=0x{characteristic.handle:04x}; "
+            f"props=[{properties}]; descriptors=[{descriptor_text}]"
+        )
+        self._trace_note(f"GATT:{self._eqiva_gatt_profile}")
+        self._codec().set_notify_handler(characteristic.handle, _observed_callback)
         _LOGGER.debug(
             "%s: Eqiva raw ATT notify handler prepared locally for handle 0x%04x",
             self.address,
@@ -191,32 +212,41 @@ class EqivaRawATTClient(HaMgmtClient):
     async def enable_prepared_notify(
         self, characteristic: BleakGATTCharacteristic
     ) -> None:
-        """Enable notifications initially with a non-blocking ATT Write Command."""
-        codec = self._codec()
-        cccd, cccd_value = self._notification_cccd(characteristic)
-        try:
-            await codec.write_command(cccd.handle, cccd_value)
-        except BaseException:
-            codec.remove_notify_handler(characteristic.handle)
-            raise
-        _LOGGER.debug(
-            "%s: Eqiva raw ATT CCCD enabled via Write Command (handle 0x%04x)",
-            self.address,
-            cccd.handle,
-        )
+        """Keep v29 notification timing: local-only, then delayed CCCD command."""
+        self._eqiva_notify_mode = "local-only-wait"
+        self._trace_note("NOTIFY:local-only-window=250ms")
+
+        async def _delayed_cccd_command() -> None:
+            await asyncio.sleep(0.25)
+            if self._eqiva_seen_notification:
+                self._trace_note("NOTIFY:cccd-command-not-needed")
+                return
+
+            self._eqiva_notify_mode = "cccd-command-delayed"
+            self._trace_note("NOTIFY:cccd-write-command-after-250ms")
+            codec = self._codec()
+            cccd, cccd_value = self._notification_cccd(characteristic)
+            try:
+                await codec.write_command(cccd.handle, cccd_value)
+            except Exception as err:  # noqa: BLE001
+                self._trace_note(
+                    f"NOTIFY:cccd-command-error={type(err).__name__}:{err}"
+                )
+                return
+            _LOGGER.debug(
+                "%s: Eqiva raw ATT CCCD enabled via delayed Write Command "
+                "(handle 0x%04x)",
+                self.address,
+                cccd.handle,
+            )
+
+        self._eqiva_v29_cccd_task = asyncio.create_task(_delayed_cccd_command())
 
     async def confirm_prepared_notify(
         self, characteristic: BleakGATTCharacteristic
     ) -> None:
-        """Repeat the already-enabled CCCD value as a real ATT Write Request."""
-        codec = self._codec()
-        cccd, cccd_value = self._notification_cccd(characteristic)
-        await codec.write(cccd.handle, cccd_value)
-        _LOGGER.debug(
-            "%s: Eqiva raw ATT CCCD confirmed via Write Request (handle 0x%04x)",
-            self.address,
-            cccd.handle,
-        )
+        """Keep the proven v29 path without a protected CCCD Write Request."""
+        self._trace_note("CCCD:write-request-skipped-v29")
 
     async def start_notify(
         self,
@@ -235,3 +265,38 @@ class EqivaRawATTClient(HaMgmtClient):
                 await codec.write_command(cccd.handle, _CCCD_OFF)
         finally:
             codec.remove_notify_handler(characteristic.handle)
+
+    async def write_gatt_char(
+        self,
+        characteristic: BleakGATTCharacteristic,
+        data,
+        response: bool,
+    ) -> None:
+        """Send v37 real ATT Write Requests without awaiting ATT Write Response."""
+        if not response:
+            await super().write_gatt_char(characteristic, data, response)
+            return
+
+        value = bytes(data)
+        max_len = self.mtu_size - 3
+        if len(value) > max_len:
+            raise BleakError(
+                f"value too long for an ATT write: {len(value)} > {max_len} "
+                "(long writes are not supported)"
+            )
+
+        payload = (
+            bytes([_ATT_WRITE_REQUEST])
+            + characteristic.handle.to_bytes(2, "little")
+            + value
+        )
+        self._trace_note(f"WRITE:fire-and-forget-request@0x{characteristic.handle:04x}")
+        await self._send_traced_pdu(payload)
+
+    @property
+    def notify_mode(self) -> str:
+        return getattr(self, "_eqiva_notify_mode", "unknown")
+
+    @property
+    def gatt_profile(self) -> str:
+        return getattr(self, "_eqiva_gatt_profile", "unknown")

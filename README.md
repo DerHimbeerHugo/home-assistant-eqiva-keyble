@@ -1,43 +1,33 @@
 # Eqiva Bluetooth Smart Lock for Home Assistant
 
+Native Home Assistant integration for the **eQ-3 / Eqiva Bluetooth Smart Lock (Key-BLE, 142950A0)**.
 
-Native Home Assistant integration for the **eQ-3 / Eqiva Bluetooth Smart Lock
-(Key-BLE, 142950A0)**.
-
-
-The integration communicates locally over Bluetooth. No MQTT broker, Node.js
-service or cloud account is required.
-
+The integration communicates locally over Bluetooth. Home Assistant provides discovery and connectable Bluetooth paths; no MQTT broker, Node.js service or cloud account is required.
 
 > [!WARNING]
-> Keep a physical key available while testing. Never publish Key Card QR data,
-> user IDs or user keys in issues, logs, screenshots or chat messages.
-
+> Keep a physical key available while testing. Never publish Key Card QR data, user IDs or user keys in issues, logs, screenshots or chat messages.
 
 ## Features
 
-
-- Native Home Assistant Bluetooth integration
+- Native Home Assistant Bluetooth discovery
 - Setup through the Home Assistant UI
 - Pairing with the original Eqiva Key Card
 - Native `lock` entity with lock, unlock and open-latch commands
 - Immediate locking, unlocking and opening transition states
-- Translated battery status sensor (`OK` / `Low`, `i.O.` / `Schwach`)
-- Configurable 1–60 minute status synchronization in energy-saving mode
-- Energy-saving polling mode with connections only when required
+- Battery status sensor
+- Energy-saving polling mode with configurable 1–60 minute status synchronization
 - Live mode with persistent KeyBLE session, 3-minute keepalive and immediate manual status changes
 - Automatic reconnect with bounded backoff in live mode
 - One safe connection/session retry before an operation starts
+- Automatic internal Bluetooth backend selection with no transport setting for users
+- Local Linux/BlueZ adapter support through the Eqiva-specific Raw ATT compatibility backend
+- ESPHome Bluetooth Proxy support through Home Assistant GATT
 - Optional KNX/IP bridge with freely configurable group addresses
+- Privacy-safe Home Assistant diagnostics for Bluetooth path, RSSI and runtime state
 
-
-Motor commands are deliberately never retried after they have been sent. A
-Bluetooth timeout after a command can be ambiguous because the lock may already
-be moving.
-
+Motor commands are deliberately never retried after they have been sent. A Bluetooth timeout after a command can be ambiguous because the lock may already be moving.
 
 ## Installation with HACS
-
 
 1. Open **HACS** in Home Assistant.
 2. Open the menu and choose **Custom repositories**.
@@ -45,120 +35,81 @@ be moving.
 4. Select repository type **Integration**.
 5. Install **Eqiva Bluetooth Smart Lock**.
 6. Restart Home Assistant.
-7. Go to **Settings → Devices & services → Add integration** and search for
-   **Eqiva Bluetooth Smart Lock**.
-
-
-HACS installs stable versions from GitHub releases. New development work remains
-on dedicated development branches until it has passed real-hardware testing.
-
+7. Go to **Settings → Devices & services → Add integration** and search for **Eqiva Bluetooth Smart Lock**.
 
 ## Pairing with the Eqiva Key Card
 
-
-The QR code on the original Key Card contains the Bluetooth address and card key
-needed to register a new user on the lock.
-
+The QR code on the original Key Card contains the Bluetooth address and card key needed to register a new user on the lock.
 
 1. Start the integration setup; the Key Card form opens directly.
 2. Enter a name and the complete QR-code data locally in Home Assistant.
-3. Select the Bluetooth connection mode and optionally enable KNX.
+3. Choose the connection mode and optionally enable KNX.
 4. Hold the **unlock** button on the lock until the yellow LED flashes.
 5. Submit the form.
 
+There is no Bluetooth transport selection. The integration determines the required backend automatically from the current Home Assistant Bluetooth path. A local Linux `hci` path uses the Eqiva-specific Raw ATT compatibility backend; installations reached through an ESPHome Bluetooth Proxy use Home Assistant GATT.
 
-The Key Card data itself is not persisted after successful pairing. The newly
-registered user ID and user key are stored in the Home Assistant config entry
-because they are required for future encrypted communication with the lock.
+The Key Card data itself is not persisted after successful pairing. The newly registered user ID and user key are stored in the Home Assistant config entry because they are required for future encrypted communication with the lock.
 
 ## Connection modes
 
-The mode can be changed under **Settings → Devices & services → Eqiva Bluetooth
-Smart Lock → Configure**. The synchronization interval is shown only while
-energy-saving mode is active.
+The mode can be changed under **Settings → Devices & services → Eqiva Bluetooth Smart Lock → Configure**.
 
 ### Energy saving (default)
 
-Home Assistant connects only for a status update or command and disconnects
-afterwards. The default interval is 10 minutes and can be configured from 1 to
-60 minutes.
+Home Assistant connects only for a status update or command and disconnects afterwards. The default interval is 10 minutes and can be configured from 1 to 60 minutes.
 
 ### Live
 
-Home Assistant keeps the BLE and KeyBLE session open. Manual changes at the lock
-are reported immediately, and an unexpected disconnect starts an automatic
-reconnect with bounded backoff. An independent status keepalive runs after at
-most three idle minutes, matching the proven ESPHome setup and preventing the
-lock's roughly four-minute idle timeout. Any successful command or status
-traffic restarts that keepalive timer. This keepalive is the only scheduled
-status synchronization in live mode, so no separate polling interval is shown.
+Home Assistant keeps the BLE and KeyBLE session open. Manual changes at the lock are reported immediately, and an unexpected disconnect starts an automatic reconnect with bounded backoff. An independent status keepalive runs after at most three idle minutes and prevents the lock's roughly four-minute idle timeout.
 
-The Eqiva lock accepts only a limited number of simultaneous Bluetooth
-connections. The official Eqiva app or another KeyBLE client may therefore be
-unable to connect while live mode is active. Live mode can also increase battery
-usage compared with energy-saving mode.
+The Eqiva lock accepts only a limited number of simultaneous Bluetooth connections. The official Eqiva app or another KeyBLE client may therefore be unable to connect while live mode is active. Live mode can also increase battery usage compared with energy-saving mode.
+
+## Bluetooth architecture in v0.4
+
+Version 0.4 deliberately exposes **no Bluetooth transport choice** to the user. Bluetooth discovery remains integrated with Home Assistant, while the integration selects one internal backend before a KeyBLE session begins:
+
+- **Local Linux/BlueZ `hci` path:** the Eqiva-specific Raw ATT compatibility backend is used. It preserves the hardware-confirmed MTU-23 behavior, local notification handler, delayed CCCD Write Command and Eqiva Write Request semantics.
+- **ESPHome Bluetooth Proxy / non-local Home Assistant path:** Home Assistant GATT is used through Bleak and `bleak-retry-connector`.
+
+The local compatibility backend is necessary because the Eqiva lock does not reliably complete the normal BlueZ notification setup. Hardware testing with the normal BlueZ GATT path produced GATT `0x0E` / `org.bluez.Error.NotConnected` during notification activation. BlueZ intentionally owns CCCD subscription through `StartNotify`/`AcquireNotify` and does not expose the direct CCCD Write Command needed to reproduce the proven Eqiva timing through its normal D-Bus GATT API.
+
+This backend decision is made before session establishment. Connection/session retries may occur before a command, but a motor command is never replayed on another backend after it has been sent.
+
+### ESPHome Bluetooth Proxy note
+
+The Eqiva lock rejects the normal ESPHome/Bleak notification CCCD write before the KeyBLE nonce exchange with ATT error `0x05` (insufficient authentication). For ESPHome proxy connections the integration therefore uses a narrowly scoped notification registration workaround that skips that protected descriptor write while keeping discovery, connection and GATT communication on Home Assistant's Bluetooth path.
+
+This ESPHome proxy path has been confirmed on real hardware for status reads, live notifications, locking and unlocking.
 
 ## KNX/IP bridge
 
-The optional KNX bridge uses Home Assistant's existing KNX/IP connection; it
-does not open a second tunnel. Enable it directly during initial setup or later
-under **Settings → Devices & services → Eqiva Bluetooth Smart Lock → Configure**.
-Home Assistant then adds editable KNX group-address fields to the
-**Configuration** section of the lock's device page.
-Enter only the addresses you need. Free-level, two-level and three-level KNX
-group-address formats are accepted. Existing addresses entered with v0.3.0b1
-are retained automatically.
+The optional KNX bridge uses Home Assistant's existing KNX/IP connection; it does not open a second tunnel. Enable it directly during initial setup or later under **Settings → Devices & services → Eqiva Bluetooth Smart Lock → Configure**. Home Assistant then adds editable KNX group-address fields to the **Configuration** section of the lock's device page.
 
-All KNX objects use DPT 1.001. Lock, unlock and open-latch commands have separate
-addresses and react only to an incoming value `1`; value `0`, responses and
-outgoing telegrams are ignored. Optional status addresses report locked,
-battery-low and availability states and answer GroupValueRead requests.
+All KNX objects use DPT 1.001. Lock, unlock and open-latch commands have separate addresses and react only to an incoming value `1`. Optional status addresses report locked, battery-low and availability states and answer GroupValueRead requests.
+
+## Diagnostics
+
+Home Assistant can export integration diagnostics containing the selected internal Bluetooth backend/path type, source, RSSI, notification mode, connection state and the latest runtime result. Bluetooth address, user ID and user key are redacted.
 
 ## Bluetooth requirements
 
-The raw ATT transport used for this lock requires a **local Linux/BlueZ Bluetooth
-adapter** available to Home Assistant as an `hci` adapter. A Bluetooth proxy may
-discover the lock, but it cannot provide the local raw L2CAP/ATT connection path
-required by this integration.
+Home Assistant needs at least one connectable Bluetooth path that can reach the lock. This can be a supported local Linux/BlueZ Bluetooth adapter or an ESPHome Bluetooth Proxy. Local adapter operation additionally requires the Home Assistant Core environment to permit the Raw L2CAP/ATT socket used by the Eqiva compatibility backend. Reliable operation still depends on usable BLE signal strength.
 
-Close the official Eqiva app and stop other KeyBLE bridges while pairing or when
-diagnosing connection problems.
+Close the official Eqiva app and stop other KeyBLE bridges while pairing or when diagnosing connection problems.
 
-## What's new in v0.3.2
-
-- Allow KNX to be enabled directly during initial Key Card setup
-- Preserve the selected KNX state in the newly created configuration entry
-- Include the clarified QR-code, OK-button and live-mode guidance in a new release
-
-## What's new in v0.3.1
-
-- Register configured KNX event addresses explicitly with DPT 1.001
-- Supply the required `remove: false` flag during KNX event registration
-- Send all KNX command and status objects consistently as DPT 1.001
-- Add focused debug output for KNX registration and received Eqiva telegrams
-- Clarify Key Card entry and the latency benefit of live mode during setup
-
-## What's new in v0.3.0
-
-- Optional KNX/IP bridge using Home Assistant's existing KNX connection
-- Six freely configurable DPT 1 command and status group addresses on the device page
-- GroupValueRead responses for configured KNX status objects
-- Automatic 3-minute keepalive and reconnect for persistent live sessions
-- No redundant polling interval in live mode; energy-saving polling remains configurable
-- New installations start directly with the original Key Card QR code
-- Existing configuration entries upgrade without being recreated
+The runtime architecture is documented in [`docs/transport-architecture.md`](docs/transport-architecture.md).
 
 ## Protocol / credits
 
-The Key-BLE protocol implementation is based on the reverse engineering from
-the ISC-licensed [`oyooyo/keyble`](https://github.com/oyooyo/keyble) project. The
-command IDs, message framing, AES-128 authentication/encryption and pairing flow
-are ported to Python and Home Assistant's Bluetooth stack.
+The Key-BLE protocol implementation is based on the reverse engineering from the ISC-licensed [`oyooyo/keyble`](https://github.com/oyooyo/keyble) project. The command IDs, message framing, AES-128 authentication/encryption and pairing flow are ported to Python and Home Assistant's Bluetooth stack.
 
 ## Tested hardware
 
 - eQ-3 / Eqiva Bluetooth Smart Lock
 - Model / article number: **142950A0**
+- Local Linux/BlueZ adapter through Eqiva Raw ATT compatibility path
+- ESPHome Bluetooth Proxy through Home Assistant GATT: status, live updates and motor commands
 
 ## License
 

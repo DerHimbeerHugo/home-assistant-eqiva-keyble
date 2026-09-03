@@ -4,7 +4,7 @@
     "step": {
       "key_card": {
         "title": "Pair using Key Card",
-        "description": "Scan the QR code on the Eqiva Key Card with a QR code scanner and paste the complete result into the field below. Then hold the unlock button on the lock until the yellow LED flashes and confirm with OK. The QR code data is not stored after successful pairing.\n\nTechnical diagnosis: {error}",
+        "description": "Scan the QR code on the Eqiva Key Card with a QR code scanner and paste the complete result into the field below. Then hold the unlock button on the lock until the yellow LED flashes and confirm with OK. The QR code data is not stored after successful pairing. Home Assistant automatically uses an available connectable Bluetooth path, including ESPHome Bluetooth Proxies.\n\nTechnical diagnosis: {error}",
         "data": {
           "name": "Name",
           "key_card": "Key Card QR data",
@@ -71,7 +71,7 @@
     "step": {
       "init": {
         "title": "Eqiva lock options",
-        "description": "Configure Bluetooth and enable the optional connection to the existing Home Assistant KNX/IP integration. After KNX is enabled, group addresses can be edited in the Configuration section of the device page.",
+        "description": "Configure the connection mode and optionally enable the existing Home Assistant KNX/IP integration. Bluetooth adapter and proxy selection is handled automatically by Home Assistant.",
         "data": {
           "connection_mode": "Bluetooth connection mode",
           "poll_interval": "Polling interval (minutes)",

@@ -1,0 +1,6 @@
+bleak==3.0.2
+bleak-retry-connector==4.6.3
+cryptography==48.0.1
+habluetooth==6.26.5
+pytest==8.4.2
+pytest-asyncio==1.2.0

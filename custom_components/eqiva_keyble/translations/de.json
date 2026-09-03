@@ -4,7 +4,7 @@
     "step": {
       "key_card": {
         "title": "Mit Key Card koppeln",
-        "description": "Scanne den QR-Code der Eqiva Key Card mit einem QR-Code-Scanner und kopiere den vollständigen Inhalt in das Feld unten. Halte anschließend am Schloss die Entriegeln-Taste gedrückt, bis die gelbe LED blinkt, und bestätige mit OK. Die QR-Code-Daten werden nach erfolgreicher Kopplung nicht gespeichert.\n\nTechnische Diagnose: {error}",
+        "description": "Scanne den QR-Code der Eqiva Key Card mit einem QR-Code-Scanner und kopiere den vollständigen Inhalt in das Feld unten. Halte anschließend am Schloss die Entriegeln-Taste gedrückt, bis die gelbe LED blinkt, und bestätige mit OK. Die QR-Code-Daten werden nach erfolgreicher Kopplung nicht gespeichert. Home Assistant verwendet automatisch einen verfügbaren connectable Bluetooth-Pfad, einschließlich ESPHome-Bluetooth-Proxys.\n\nTechnische Diagnose: {error}",
         "data": {
           "name": "Name",
           "key_card": "QR-Code-Daten der Key Card",
@@ -71,7 +71,7 @@
     "step": {
       "init": {
         "title": "Optionen für das Eqiva Türschloss",
-        "description": "Lege Bluetooth fest und aktiviere optional die Anbindung an die bestehende Home-Assistant-KNX/IP-Integration. Nach der Aktivierung können die Gruppenadressen im Abschnitt Konfiguration der Geräteseite eingetragen werden.",
+        "description": "Lege den Verbindungsmodus fest und aktiviere optional die bestehende Home-Assistant-KNX/IP-Integration. Die Auswahl von Bluetooth-Adapter oder Proxy übernimmt Home Assistant automatisch.",
         "data": {
           "connection_mode": "Bluetooth-Verbindungsmodus",
           "poll_interval": "Abfrageintervall (Minuten)",

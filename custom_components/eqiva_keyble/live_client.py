@@ -4,8 +4,6 @@ import asyncio
 import logging
 from collections.abc import Callable
 
-from bleak import BleakClient
-
 from .protocol import (
     MSG_COMMAND,
     MSG_STATUS_CHANGED,
@@ -39,17 +37,9 @@ class EqivaLiveKeyBleClient(EqivaRetryingKeyBleClient):
         self._live_status_callback = status_callback
         self._live_disconnect_callback = disconnect_callback
 
-    def _on_disconnect(self, client: BleakClient) -> None:
-        """Reset the protocol session and request a reconnect while live mode is active."""
-        intentional = client is getattr(
-            self, "_eqiva_intentional_disconnect_client", None
-        )
-        super()._on_disconnect(client)
-        if (
-            not intentional
-            and not self._closing
-            and self._live_disconnect_callback is not None
-        ):
+    def _handle_unexpected_disconnect(self) -> None:
+        """Request a reconnect while live mode is active."""
+        if not self._closing and self._live_disconnect_callback is not None:
             self._live_disconnect_callback()
 
     def _handle_fragment(self, fragment: bytes) -> None:
