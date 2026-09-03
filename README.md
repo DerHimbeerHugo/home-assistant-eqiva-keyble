@@ -2,14 +2,14 @@
 
 Native Home Assistant integration for the **eQ-3 / Eqiva Bluetooth Smart Lock (Key-BLE, 142950A0)**.
 
-The integration communicates locally over Home Assistant's Bluetooth stack. No MQTT broker, Node.js service or cloud account is required.
+The integration communicates locally over Bluetooth. Home Assistant provides discovery and connectable Bluetooth paths; no MQTT broker, Node.js service or cloud account is required.
 
 > [!WARNING]
 > Keep a physical key available while testing. Never publish Key Card QR data, user IDs or user keys in issues, logs, screenshots or chat messages.
 
 ## Features
 
-- Native Home Assistant Bluetooth integration
+- Native Home Assistant Bluetooth discovery
 - Setup through the Home Assistant UI
 - Pairing with the original Eqiva Key Card
 - Native `lock` entity with lock, unlock and open-latch commands
@@ -19,7 +19,9 @@ The integration communicates locally over Home Assistant's Bluetooth stack. No M
 - Live mode with persistent KeyBLE session, 3-minute keepalive and immediate manual status changes
 - Automatic reconnect with bounded backoff in live mode
 - One safe connection/session retry before an operation starts
-- Home Assistant-selected local Bluetooth adapters and ESPHome Bluetooth Proxies
+- Automatic internal Bluetooth backend selection with no transport setting for users
+- Local Linux/BlueZ adapter support through the Eqiva-specific Raw ATT compatibility backend
+- ESPHome Bluetooth Proxy support through Home Assistant GATT
 - Optional KNX/IP bridge with freely configurable group addresses
 - Privacy-safe Home Assistant diagnostics for Bluetooth path, RSSI and runtime state
 
@@ -45,7 +47,7 @@ The QR code on the original Key Card contains the Bluetooth address and card key
 4. Hold the **unlock** button on the lock until the yellow LED flashes.
 5. Submit the form.
 
-There is no Bluetooth transport selection. The integration asks Home Assistant for a current connectable Bluetooth device and Home Assistant chooses the available path, including local adapters and ESPHome Bluetooth Proxies.
+There is no Bluetooth transport selection. The integration determines the required backend automatically from the current Home Assistant Bluetooth path. A local Linux `hci` path uses the Eqiva-specific Raw ATT compatibility backend; installations reached through an ESPHome Bluetooth Proxy use Home Assistant GATT.
 
 The Key Card data itself is not persisted after successful pairing. The newly registered user ID and user key are stored in the Home Assistant config entry because they are required for future encrypted communication with the lock.
 
@@ -65,11 +67,14 @@ The Eqiva lock accepts only a limited number of simultaneous Bluetooth connectio
 
 ## Bluetooth architecture in v0.4
 
-Version 0.4 uses one Bluetooth transport only: **Home Assistant GATT**.
+Version 0.4 deliberately exposes **no Bluetooth transport choice** to the user. Bluetooth discovery remains integrated with Home Assistant, while the integration selects one internal backend before a KeyBLE session begins:
 
-The integration obtains a connectable BLE device from Home Assistant instead of opening its own Linux `hciX`/Raw ATT connection. This allows Home Assistant to select the usable Bluetooth path and keeps adapter/proxy handling inside the Home Assistant Bluetooth infrastructure.
+- **Local Linux/BlueZ `hci` path:** the Eqiva-specific Raw ATT compatibility backend is used. It preserves the hardware-confirmed MTU-23 behavior, local notification handler, delayed CCCD Write Command and Eqiva Write Request semantics.
+- **ESPHome Bluetooth Proxy / non-local Home Assistant path:** Home Assistant GATT is used through Bleak and `bleak-retry-connector`.
 
-The previously developed local Raw ATT implementation was removed before the public 0.4 release candidate. It was valuable during protocol reverse engineering, but maintaining a second low-level Linux-specific Bluetooth stack would add complexity and additional Home Assistant update risk without providing a user-facing benefit.
+The local compatibility backend is necessary because the Eqiva lock does not reliably complete the normal BlueZ notification setup. A b4 hardware test with the normal BlueZ GATT path produced GATT `0x0E` / `org.bluez.Error.NotConnected` during notification activation. BlueZ intentionally owns CCCD subscription through `StartNotify`/`AcquireNotify` and does not expose the direct CCCD Write Command needed to reproduce the proven Eqiva timing through its normal D-Bus GATT API.
+
+This backend decision is made before session establishment. Connection/session retries may occur before a command, but a motor command is never replayed on another backend after it has been sent.
 
 ### ESPHome Bluetooth Proxy note
 
@@ -85,11 +90,11 @@ All KNX objects use DPT 1.001. Lock, unlock and open-latch commands have separat
 
 ## Diagnostics
 
-Home Assistant can export integration diagnostics containing the selected Bluetooth backend/path type, source, RSSI, notification mode, connection state and the latest runtime result. Bluetooth address, user ID and user key are redacted.
+Home Assistant can export integration diagnostics containing the selected internal Bluetooth backend/path type, source, RSSI, notification mode, connection state and the latest runtime result. Bluetooth address, user ID and user key are redacted.
 
 ## Bluetooth requirements
 
-Home Assistant needs at least one connectable Bluetooth path that can reach the lock. This can be a supported local Bluetooth adapter or an ESPHome Bluetooth Proxy. Reliable operation still depends on usable BLE signal strength.
+Home Assistant needs at least one connectable Bluetooth path that can reach the lock. This can be a supported local Linux/BlueZ Bluetooth adapter or an ESPHome Bluetooth Proxy. Local adapter operation additionally requires the Home Assistant Core environment to permit the Raw L2CAP/ATT socket used by the Eqiva compatibility backend. Reliable operation still depends on usable BLE signal strength.
 
 Close the official Eqiva app and stop other KeyBLE bridges while pairing or when diagnosing connection problems.
 
@@ -103,6 +108,7 @@ The Key-BLE protocol implementation is based on the reverse engineering from the
 
 - eQ-3 / Eqiva Bluetooth Smart Lock
 - Model / article number: **142950A0**
+- Local Linux/BlueZ adapter through Eqiva Raw ATT compatibility path
 - ESPHome Bluetooth Proxy through Home Assistant GATT: status, live updates and motor commands
 
 ## License
