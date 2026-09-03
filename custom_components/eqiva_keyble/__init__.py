@@ -18,11 +18,11 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import EqivaCoordinator
-from .ha_gatt_transport import HomeAssistantGattTransport
 from .knx_bridge import EqivaKnxBridge
 from .live_client import EqivaLiveKeyBleClient
 from .protocol import canonical_key
 from .retrying_client import EqivaRetryingKeyBleClient
+from .transport_factory import create_transport
 
 PLATFORMS = [Platform.LOCK, Platform.SENSOR, Platform.TEXT]
 
@@ -36,7 +36,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if connection_mode == CONNECTION_MODE_LIVE
         else EqivaRetryingKeyBleClient
     )
-    transport = HomeAssistantGattTransport(
+    transport = create_transport(
         hass,
         entry.data[CONF_ADDRESS],
         entry.data.get(CONF_NAME, entry.title),
