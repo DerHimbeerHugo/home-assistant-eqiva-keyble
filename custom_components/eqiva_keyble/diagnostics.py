@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import CONF_ADDRESS, CONF_USER_ID, CONF_USER_KEY
 from .ha_gatt_transport import HomeAssistantGattTransport
+from .raw_att_transport import RawAttTransport, local_raw_path
 
 _TO_REDACT = [CONF_ADDRESS, CONF_USER_ID, CONF_USER_KEY]
 
@@ -26,25 +27,51 @@ def _status_diagnostics(status: Any) -> dict[str, Any] | None:
     }
 
 
-def _transport_diagnostics(transport: HomeAssistantGattTransport) -> dict[str, Any]:
-    backend = getattr(transport, "_backend_name", None)
-    backend_lower = (backend or "").lower()
-    if "bleak_esphome" in backend_lower:
-        path_type = "esphome_proxy"
-    elif "bluezdbus" in backend_lower:
-        path_type = "local_bluez"
-    else:
-        path_type = "unknown"
-
-    return {
+def _transport_diagnostics(transport: Any) -> dict[str, Any]:
+    data: dict[str, Any] = {
         "kind": str(transport.kind),
         "connected": transport.is_connected,
-        "path_type": path_type,
-        "backend": backend,
-        "source": getattr(transport, "_device_source", None),
-        "rssi": getattr(transport, "_rssi", None),
-        "notify_mode": getattr(transport, "_notify_mode", None),
     }
+
+    if isinstance(transport, HomeAssistantGattTransport):
+        backend = getattr(transport, "_backend_name", None)
+        backend_lower = (backend or "").lower()
+        if "bleak_esphome" in backend_lower:
+            path_type = "esphome_proxy"
+        elif "bluezdbus" in backend_lower:
+            path_type = "local_bluez"
+        else:
+            path_type = "home_assistant_gatt"
+        data.update(
+            {
+                "path_type": path_type,
+                "backend": backend,
+                "source": getattr(transport, "_device_source", None),
+                "rssi": getattr(transport, "_rssi", None),
+                "notify_mode": getattr(transport, "_notify_mode", None),
+            }
+        )
+        return data
+
+    if isinstance(transport, RawAttTransport):
+        path = local_raw_path(transport.hass, transport.address)
+        backend = getattr(getattr(transport, "_client", None), "_backend", None)
+        data.update(
+            {
+                "path_type": "local_raw_att",
+                "backend": (
+                    f"{type(backend).__module__}.{type(backend).__name__}"
+                    if backend is not None
+                    else None
+                ),
+                "local_path_available": path is not None,
+                "adapter": path.scanner.adapter if path is not None else None,
+                "source": path.scanner.source if path is not None else None,
+                "rssi": path.advertisement.rssi if path is not None else None,
+                "notify_mode": getattr(backend, "notify_mode", None),
+            }
+        )
+    return data
 
 
 async def async_get_config_entry_diagnostics(
