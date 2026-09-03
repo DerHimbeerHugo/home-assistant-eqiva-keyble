@@ -193,6 +193,94 @@ class HomeAssistantGattTransport(EqivaTransport):
         ):
             self._disconnected_callback()
 
+    async def _start_notifications(
+        self,
+        backend: Any,
+        notification_callback: NotificationCallback,
+        attempt: int,
+    ) -> None:
+        """Register Eqiva notifications without forcing proxy CCCD security.
+
+        bleak-esphome connection-v3 first registers a proxy-side notification
+        callback and then writes the CCCD itself. The Eqiva lock rejects that
+        protected descriptor write with ATT 0x05 before the KeyBLE nonce
+        exchange. The proven v29 Raw-ATT path intentionally works with only a
+        locally registered notification handler, so mirror that behavior on an
+        ESPHome proxy by using bleak-esphome's already available low-level
+        subscription registration and deliberately skipping its CCCD write.
+        """
+        characteristic = self._receive_characteristic
+        if characteristic is None:
+            raise EqivaConnectionError(
+                "Eqiva Receive-Characteristic ist nicht verfügbar"
+            )
+
+        backend_module = type(backend).__module__ if backend is not None else ""
+        if backend_module.startswith("bleak_esphome."):
+            api_client = getattr(backend, "_client", None)
+            address_as_int = getattr(backend, "_address_as_int", None)
+            notify_cancels = getattr(backend, "_notify_cancels", None)
+            start_proxy_notify = getattr(
+                api_client,
+                "bluetooth_gatt_start_notify",
+                None,
+            )
+            if (
+                api_client is None
+                or address_as_int is None
+                or not isinstance(notify_cancels, dict)
+                or start_proxy_notify is None
+            ):
+                raise EqivaConnectionError(
+                    "Das ESPHome-Bleak-Backend stellt den für Eqiva benötigten "
+                    "Local-Notify-Pfad ohne CCCD-Write nicht bereit"
+                )
+
+            ble_handle = characteristic.handle
+            if ble_handle in notify_cancels:
+                raise EqivaConnectionError(
+                    "ESPHome-Notifications sind für die Eqiva-Characteristic "
+                    "bereits registriert"
+                )
+
+            def _proxy_notification(_handle: int, data: bytearray) -> None:
+                notification_callback(bytes(data))
+
+            notify_cancels[ble_handle] = await start_proxy_notify(
+                address_as_int,
+                ble_handle,
+                _proxy_notification,
+            )
+            self._notify_mode = "ESPHomeLocalOnly"
+            _LOGGER.debug(
+                "Eqiva %s: transport=%s registered ESPHome proxy notify handler "
+                "without protected CCCD write; handle=%s",
+                self.address,
+                self.kind,
+                ble_handle,
+            )
+            return
+
+        is_local_bluez = "bluezdbus" in (self._backend_name or "").lower()
+        use_acquire_notify = is_local_bluez and attempt == 1
+        self._notify_mode = (
+            "AcquireNotify" if use_acquire_notify else "StartNotify"
+        )
+
+        def _notification(_characteristic, data: bytearray) -> None:
+            notification_callback(bytes(data))
+
+        notify_kwargs = (
+            {"bluez": {"use_start_notify": False}} if use_acquire_notify else {}
+        )
+        if self._client is None:
+            raise EqivaConnectionError("HA-GATT-Client ist nicht verfügbar")
+        await self._client.start_notify(
+            characteristic,
+            _notification,
+            **notify_kwargs,
+        )
+
     async def connect(
         self,
         notification_callback: NotificationCallback,
@@ -271,22 +359,10 @@ class HomeAssistantGattTransport(EqivaTransport):
                     )
 
                 await asyncio.sleep(0.25)
-                is_local_bluez = "bluezdbus" in self._backend_name.lower()
-                use_acquire_notify = is_local_bluez and attempt == 1
-                self._notify_mode = (
-                    "AcquireNotify" if use_acquire_notify else "StartNotify"
-                )
-
-                def _notification(_characteristic, data: bytearray) -> None:
-                    notification_callback(bytes(data))
-
-                notify_kwargs = (
-                    {"bluez": {"use_start_notify": False}} if use_acquire_notify else {}
-                )
-                await self._client.start_notify(
-                    self._receive_characteristic,
-                    _notification,
-                    **notify_kwargs,
+                await self._start_notifications(
+                    backend,
+                    notification_callback,
+                    attempt,
                 )
                 _LOGGER.debug(
                     "Eqiva %s: transport=%s connected backend=%s source=%s "
