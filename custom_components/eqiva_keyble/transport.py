@@ -6,8 +6,9 @@ from enum import StrEnum
 
 
 class TransportType(StrEnum):
-    """Bluetooth transport used by the Eqiva integration."""
+    """Internal Bluetooth backend used by the Eqiva integration."""
 
+    RAW_ATT = "raw_att"
     HA_GATT = "ha_gatt"
 
 
