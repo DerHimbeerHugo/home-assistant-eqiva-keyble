@@ -17,7 +17,7 @@ from .exceptions import (
     EqivaNotFoundError,
     EqivaProtocolError,
 )
-from .transport import EqivaTransport, TransportType
+from .transport import EqivaTransport
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
@@ -27,8 +27,6 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-# Compatibility re-exports for existing integration modules and retained
-# historical patch files.
 __all__ = [
     "EqivaConnectionError",
     "EqivaHandshakeError",
@@ -195,7 +193,6 @@ class EqivaKeyBleClient:
         name: str = "Eqiva Key-BLE",
         *,
         transport: EqivaTransport | None = None,
-        requested_transport: str = TransportType.RAW_ATT,
     ) -> None:
         self.hass = hass
         self.address = canonical_address(address)
@@ -204,13 +201,12 @@ class EqivaKeyBleClient:
         self.name = name
 
         if transport is None:
-            from .transport_factory import create_transport
+            from .ha_gatt_transport import HomeAssistantGattTransport
 
-            transport = create_transport(
+            transport = HomeAssistantGattTransport(
                 hass,
                 self.address,
                 self.name,
-                str(requested_transport),
             )
         self.transport = transport
 

@@ -10,21 +10,19 @@ from .const import (
     CONF_CONNECTION_MODE,
     CONF_NAME,
     CONF_POLL_INTERVAL,
-    CONF_TRANSPORT,
     CONF_USER_ID,
     CONF_USER_KEY,
     CONNECTION_MODE_LIVE,
     DEFAULT_CONNECTION_MODE,
     DEFAULT_POLL_INTERVAL,
-    DEFAULT_TRANSPORT,
     DOMAIN,
 )
 from .coordinator import EqivaCoordinator
+from .ha_gatt_transport import HomeAssistantGattTransport
 from .knx_bridge import EqivaKnxBridge
 from .live_client import EqivaLiveKeyBleClient
 from .protocol import canonical_key
 from .retrying_client import EqivaRetryingKeyBleClient
-from .transport_factory import create_transport
 
 PLATFORMS = [Platform.LOCK, Platform.SENSOR, Platform.TEXT]
 
@@ -38,12 +36,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if connection_mode == CONNECTION_MODE_LIVE
         else EqivaRetryingKeyBleClient
     )
-    requested_transport = str(entry.options.get(CONF_TRANSPORT, DEFAULT_TRANSPORT))
-    transport = create_transport(
+    transport = HomeAssistantGattTransport(
         hass,
         entry.data[CONF_ADDRESS],
         entry.data.get(CONF_NAME, entry.title),
-        requested_transport,
     )
     client = client_class(
         hass,
@@ -52,7 +48,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         user_key=canonical_key(entry.data[CONF_USER_KEY]),
         name=entry.data.get(CONF_NAME, entry.title),
         transport=transport,
-        requested_transport=requested_transport,
     )
     poll_interval = int(
         entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)

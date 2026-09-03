@@ -10,7 +10,6 @@ from homeassistant.core import HomeAssistant
 
 from .const import CONF_ADDRESS, CONF_USER_ID, CONF_USER_KEY
 from .ha_gatt_transport import HomeAssistantGattTransport
-from .raw_att_transport import RawAttTransport, local_raw_path
 
 _TO_REDACT = [CONF_ADDRESS, CONF_USER_ID, CONF_USER_KEY]
 
@@ -27,52 +26,25 @@ def _status_diagnostics(status: Any) -> dict[str, Any] | None:
     }
 
 
-def _transport_diagnostics(transport: Any) -> dict[str, Any]:
-    data: dict[str, Any] = {
+def _transport_diagnostics(transport: HomeAssistantGattTransport) -> dict[str, Any]:
+    backend = getattr(transport, "_backend_name", None)
+    backend_lower = (backend or "").lower()
+    if "bleak_esphome" in backend_lower:
+        path_type = "esphome_proxy"
+    elif "bluezdbus" in backend_lower:
+        path_type = "local_bluez"
+    else:
+        path_type = "unknown"
+
+    return {
         "kind": str(transport.kind),
         "connected": transport.is_connected,
+        "path_type": path_type,
+        "backend": backend,
+        "source": getattr(transport, "_device_source", None),
+        "rssi": getattr(transport, "_rssi", None),
+        "notify_mode": getattr(transport, "_notify_mode", None),
     }
-
-    if isinstance(transport, HomeAssistantGattTransport):
-        backend = getattr(transport, "_backend_name", None)
-        backend_lower = (backend or "").lower()
-        if "bleak_esphome" in backend_lower:
-            path_type = "esphome_proxy"
-        elif "bluezdbus" in backend_lower:
-            path_type = "local_bluez"
-        else:
-            path_type = "unknown"
-        data.update(
-            {
-                "path_type": path_type,
-                "backend": backend,
-                "rssi": getattr(transport, "_rssi", None),
-                "notify_mode": getattr(transport, "_notify_mode", None),
-            }
-        )
-        return data
-
-    if isinstance(transport, RawAttTransport):
-        path = local_raw_path(transport.hass, transport.address)
-        if path is None:
-            data.update(
-                {
-                    "path_type": "local_raw_att",
-                    "local_path_available": False,
-                }
-            )
-            return data
-        scanner = path.scanner
-        data.update(
-            {
-                "path_type": "local_raw_att",
-                "local_path_available": True,
-                "adapter": scanner.adapter,
-                "adapter_idx": scanner.adapter_idx,
-                "rssi": path.advertisement.rssi,
-            }
-        )
-    return data
 
 
 async def async_get_config_entry_diagnostics(

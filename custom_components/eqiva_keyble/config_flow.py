@@ -18,7 +18,6 @@ from .const import (
     CONF_KNX_ENABLED,
     CONF_NAME,
     CONF_POLL_INTERVAL,
-    CONF_TRANSPORT,
     CONF_USER_ID,
     CONF_USER_KEY,
     CONNECTION_MODE_LIVE,
@@ -27,16 +26,12 @@ from .const import (
     DEFAULT_KNX_ENABLED,
     DEFAULT_NAME,
     DEFAULT_POLL_INTERVAL,
-    DEFAULT_SETUP_TRANSPORT,
-    DEFAULT_TRANSPORT,
     DOMAIN,
+    KNX_ADDRESS_OPTIONS,
     MAX_POLL_INTERVAL,
     MIN_POLL_INTERVAL,
-    KNX_ADDRESS_OPTIONS,
-    TRANSPORT_AUTO,
-    TRANSPORT_HA_GATT,
-    TRANSPORT_RAW_ATT,
 )
+from .ha_gatt_transport import HomeAssistantGattTransport
 from .knx_address import normalize_knx_group_address
 from .protocol import (
     EqivaConnectionError,
@@ -47,7 +42,6 @@ from .protocol import (
     canonical_address,
     parse_key_card,
 )
-from .transport_factory import create_transport
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -68,19 +62,6 @@ def _connection_mode_selector() -> selector.SelectSelector:
             options=[CONNECTION_MODE_POLLING, CONNECTION_MODE_LIVE],
             mode=selector.SelectSelectorMode.DROPDOWN,
             translation_key="connection_mode",
-        )
-    )
-
-
-def _transport_selector(*, include_auto: bool = False) -> selector.SelectSelector:
-    options = [TRANSPORT_RAW_ATT, TRANSPORT_HA_GATT]
-    if include_auto:
-        options.insert(0, TRANSPORT_AUTO)
-    return selector.SelectSelector(
-        selector.SelectSelectorConfig(
-            options=options,
-            mode=selector.SelectSelectorMode.DROPDOWN,
-            translation_key="transport",
         )
     )
 
@@ -200,11 +181,15 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
         return await self.async_step_user()
 
-    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """Start every new setup directly with the original Eqiva Key Card."""
         return await self.async_step_key_card()
 
-    async def async_step_key_card(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_key_card(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         description_placeholders = {"error": "–"}
         if user_input is not None:
@@ -213,20 +198,16 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(card.address.replace(":", "").lower())
                 self._abort_if_unique_id_configured()
                 await _async_ensure_lock_seen(self.hass, card.address)
-                requested_transport = str(user_input[CONF_TRANSPORT])
-                transport = create_transport(
+                transport = HomeAssistantGattTransport(
                     self.hass,
                     card.address,
                     user_input[CONF_NAME],
-                    requested_transport,
                 )
-                resolved_transport = str(transport.kind)
                 client = EqivaKeyBleClient(
                     self.hass,
                     card.address,
                     name=user_input[CONF_NAME],
                     transport=transport,
-                    requested_transport=resolved_transport,
                 )
                 user_id, user_key = await client.pair(card.key)
                 return self.async_create_entry(
@@ -240,9 +221,6 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     options={
                         CONF_POLL_INTERVAL: DEFAULT_POLL_INTERVAL,
                         CONF_CONNECTION_MODE: user_input[CONF_CONNECTION_MODE],
-                        # Auto is intentionally resolved while a current scanner
-                        # path is known, then persisted as an explicit transport.
-                        CONF_TRANSPORT: resolved_transport,
                         CONF_KNX_ENABLED: bool(user_input[CONF_KNX_ENABLED]),
                     },
                 )
@@ -252,7 +230,9 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_key_card"
                 description_placeholders["error"] = str(err)
             except EqivaNoScannerError as err:
-                _LOGGER.exception("No connectable Home Assistant Bluetooth scanner for Eqiva")
+                _LOGGER.exception(
+                    "No connectable Home Assistant Bluetooth scanner for Eqiva"
+                )
                 errors["base"] = "no_scanner"
                 description_placeholders["error"] = str(err)
             except EqivaAddressMismatchError as err:
@@ -282,22 +262,20 @@ class EqivaKeyBleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="key_card",
-            data_schema=vol.Schema({
-                vol.Required(CONF_NAME, default=DEFAULT_NAME): str,
-                vol.Required(CONF_KEY_CARD): str,
-                vol.Required(
-                    CONF_CONNECTION_MODE,
-                    default=DEFAULT_CONNECTION_MODE,
-                ): _connection_mode_selector(),
-                vol.Required(
-                    CONF_TRANSPORT,
-                    default=DEFAULT_SETUP_TRANSPORT,
-                ): _transport_selector(include_auto=True),
-                vol.Required(
-                    CONF_KNX_ENABLED,
-                    default=DEFAULT_KNX_ENABLED,
-                ): bool,
-            }),
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_NAME, default=DEFAULT_NAME): str,
+                    vol.Required(CONF_KEY_CARD): str,
+                    vol.Required(
+                        CONF_CONNECTION_MODE,
+                        default=DEFAULT_CONNECTION_MODE,
+                    ): _connection_mode_selector(),
+                    vol.Required(
+                        CONF_KNX_ENABLED,
+                        default=DEFAULT_KNX_ENABLED,
+                    ): bool,
+                }
+            ),
             errors=errors,
             description_placeholders=description_placeholders,
         )
@@ -309,7 +287,7 @@ class EqivaKeyBleOptionsFlow(OptionsFlowWithReload):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Configure Bluetooth and enable the optional KNX bridge."""
+        """Configure connection mode and the optional KNX bridge."""
         if user_input is not None:
             poll_interval = int(
                 user_input.get(
@@ -331,15 +309,12 @@ class EqivaKeyBleOptionsFlow(OptionsFlowWithReload):
                 data={
                     CONF_POLL_INTERVAL: poll_interval,
                     CONF_CONNECTION_MODE: user_input[CONF_CONNECTION_MODE],
-                    CONF_TRANSPORT: user_input[CONF_TRANSPORT],
                     CONF_KNX_ENABLED: bool(user_input[CONF_KNX_ENABLED]),
                     **existing_addresses,
                 },
             )
 
-        displayed_options = (
-            user_input if user_input is not None else self.config_entry.options
-        )
+        displayed_options = self.config_entry.options
         current_interval = int(
             displayed_options.get(
                 CONF_POLL_INTERVAL,
@@ -352,20 +327,10 @@ class EqivaKeyBleOptionsFlow(OptionsFlowWithReload):
                 DEFAULT_CONNECTION_MODE,
             )
         )
-        current_transport = str(
-            displayed_options.get(
-                CONF_TRANSPORT,
-                DEFAULT_TRANSPORT,
-            )
-        )
         current_knx_enabled = bool(
             displayed_options.get(CONF_KNX_ENABLED, DEFAULT_KNX_ENABLED)
         )
         schema: dict[Any, Any] = {
-            vol.Required(
-                CONF_TRANSPORT,
-                default=current_transport,
-            ): _transport_selector(),
             vol.Required(
                 CONF_CONNECTION_MODE,
                 default=current_mode,

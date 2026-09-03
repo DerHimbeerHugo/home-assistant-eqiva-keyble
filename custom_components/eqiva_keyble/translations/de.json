@@ -4,17 +4,15 @@
     "step": {
       "key_card": {
         "title": "Mit Key Card koppeln",
-        "description": "Scanne den QR-Code der Eqiva Key Card mit einem QR-Code-Scanner und kopiere den vollständigen Inhalt in das Feld unten. Halte anschließend am Schloss die Entriegeln-Taste gedrückt, bis die gelbe LED blinkt, und bestätige mit OK. Die QR-Code-Daten werden nach erfolgreicher Kopplung nicht gespeichert.\n\nTechnische Diagnose: {error}",
+        "description": "Scanne den QR-Code der Eqiva Key Card mit einem QR-Code-Scanner und kopiere den vollständigen Inhalt in das Feld unten. Halte anschließend am Schloss die Entriegeln-Taste gedrückt, bis die gelbe LED blinkt, und bestätige mit OK. Die QR-Code-Daten werden nach erfolgreicher Kopplung nicht gespeichert. Home Assistant verwendet automatisch einen verfügbaren connectable Bluetooth-Pfad, einschließlich ESPHome-Bluetooth-Proxys.\n\nTechnische Diagnose: {error}",
         "data": {
           "name": "Name",
           "key_card": "QR-Code-Daten der Key Card",
           "connection_mode": "Bluetooth-Verbindungsmodus",
-          "transport": "Bluetooth-Transport",
           "knx_enabled": "KNX aktivieren"
         },
         "data_description": {
           "connection_mode": "Energiesparend verbindet nur bei Bedarf. Live hält die BLE-Verbindung offen. Dadurch erreichen Befehle das Schloss ohne erneuten Verbindungsaufbau und manuelle Schlossänderungen erscheinen sofort in Home Assistant.",
-          "transport": "Automatisch wird für neue Einrichtungen empfohlen. Während das Schloss sichtbar ist, bleibt bei einem lokalen Linux-hci-Adapter der bewährte Raw-ATT-Pfad erhalten; andernfalls wird Home Assistant GATT für einen ESPHome-Bluetooth-Proxy gewählt. Der aufgelöste Transport wird anschließend ausdrücklich gespeichert und fällt bei einem Verbindungsfehler niemals auf einen anderen Transport zurück.",
           "knx_enabled": "Verwendet die bestehende KNX/IP-Verbindung von Home Assistant. Es wird kein zweiter KNX-Tunnel geöffnet. Nach der Einrichtung erscheinen die Gruppenadressen im Abschnitt Konfiguration der Geräteseite."
         }
       }
@@ -59,13 +57,6 @@
         "polling": "Energiesparend – Verbindung nur bei Bedarf",
         "live": "Live – Verbindung dauerhaft halten"
       }
-    },
-    "transport": {
-      "options": {
-        "auto": "Automatisch – lokales Raw ATT oder Home Assistant GATT",
-        "raw_att": "Raw ATT – lokale Linux-Referenz",
-        "ha_gatt": "Home Assistant GATT – lokaler Adapter / ESPHome-Proxy"
-      }
     }
   },
   "exceptions": {
@@ -80,16 +71,14 @@
     "step": {
       "init": {
         "title": "Optionen für das Eqiva Türschloss",
-        "description": "Lege Bluetooth fest und aktiviere optional die Anbindung an die bestehende Home-Assistant-KNX/IP-Integration. Nach der Aktivierung können die Gruppenadressen im Abschnitt Konfiguration der Geräteseite eingetragen werden.",
+        "description": "Lege den Verbindungsmodus fest und aktiviere optional die bestehende Home-Assistant-KNX/IP-Integration. Die Auswahl von Bluetooth-Adapter oder Proxy übernimmt Home Assistant automatisch.",
         "data": {
           "connection_mode": "Bluetooth-Verbindungsmodus",
-          "transport": "Bluetooth-Transport",
           "poll_interval": "Abfrageintervall (Minuten)",
           "knx_enabled": "KNX aktivieren"
         },
         "data_description": {
           "connection_mode": "Im Live-Modus bleibt die KeyBLE-Verbindung offen. Ein automatischer Status-Keepalive spätestens alle 3 Minuten verhindert den Leerlauf-Timeout des Schlosses; manuelle Schlossänderungen werden sofort übernommen und echte Verbindungsabbrüche automatisch wieder aufgebaut. Andere Bluetooth-Clients wie die Eqiva-App können währenddessen nicht gleichzeitig verbinden.",
-          "transport": "Raw ATT behält den bewährten lokalen Linux-Pfad bei. Home Assistant GATT unterstützt von Home Assistant ausgewählte lokale Adapter und ESPHome-Bluetooth-Proxys. Eine Änderung dieser Option wählt genau einen Transport; Verbindungsfehler lösen niemals einen Wechsel auf den anderen Transport aus.",
           "poll_interval": "Zeit zwischen Statusabgleichen im Energiesparmodus. Im Live-Modus übernimmt ausschließlich der automatische 3-Minuten-Keepalive; deshalb wird diese Option dort ausgeblendet.",
           "knx_enabled": "Verwendet die bestehende KNX/IP-Verbindung von Home Assistant. Es wird kein zweiter KNX-Tunnel geöffnet. Nach der Aktivierung erscheinen die Gruppenadressen auf der Geräteseite."
         }

@@ -40,7 +40,7 @@ def _consume_task_result(task: asyncio.Task[Any]) -> None:
 
 
 class HomeAssistantGattTransport(EqivaTransport):
-    """Experimental GATT transport through Home Assistant's Bluetooth stack.
+    """GATT transport through Home Assistant's Bluetooth stack.
 
     Home Assistant supplies the connectable BLEDevice. That device may belong
     to a local adapter or an ESPHome Bluetooth proxy; this transport never
@@ -204,10 +204,9 @@ class HomeAssistantGattTransport(EqivaTransport):
         bleak-esphome connection-v3 first registers a proxy-side notification
         callback and then writes the CCCD itself. The Eqiva lock rejects that
         protected descriptor write with ATT 0x05 before the KeyBLE nonce
-        exchange. The proven v29 Raw-ATT path intentionally works with only a
-        locally registered notification handler, so mirror that behavior on an
-        ESPHome proxy by using bleak-esphome's already available low-level
-        subscription registration and deliberately skipping its CCCD write.
+        exchange. For an ESPHome proxy, register the already available
+        proxy-side notification callback and deliberately skip that descriptor
+        write.
         """
         characteristic = self._receive_characteristic
         if characteristic is None:
@@ -263,9 +262,7 @@ class HomeAssistantGattTransport(EqivaTransport):
 
         is_local_bluez = "bluezdbus" in (self._backend_name or "").lower()
         use_acquire_notify = is_local_bluez and attempt == 1
-        self._notify_mode = (
-            "AcquireNotify" if use_acquire_notify else "StartNotify"
-        )
+        self._notify_mode = "AcquireNotify" if use_acquire_notify else "StartNotify"
 
         def _notification(_characteristic, data: bytearray) -> None:
             notification_callback(bytes(data))
@@ -346,11 +343,9 @@ class HomeAssistantGattTransport(EqivaTransport):
                 receive_properties = set(self._receive_characteristic.properties)
                 if "write" not in send_properties:
                     raise EqivaConnectionError(
-                        "Der experimentelle HA-GATT-Pfad benötigt die echte "
-                        "Write-Request-Eigenschaft 'write'. "
-                        "'write-without-response' wäre ein ATT Write Command "
-                        "und ist kein Ersatz für die v37-Semantik. Gemeldet: "
-                        f"{sorted(send_properties)}"
+                        "Der Eqiva-GATT-Pfad benötigt die Write-Request-Eigenschaft "
+                        "'write'. 'write-without-response' ist ein anderer ATT-"
+                        f"Vorgang. Gemeldet: {sorted(send_properties)}"
                     )
                 if not ({"notify", "indicate"} & receive_properties):
                     raise EqivaConnectionError(
@@ -415,8 +410,7 @@ class HomeAssistantGattTransport(EqivaTransport):
 
     async def session_ready(self) -> None:
         # KeyBLE authentication and BLE link security are separate. The
-        # portable Bleak/proxy API owns link security; no raw BlueZ pairing or
-        # CCCD manipulation is attempted here.
+        # Home Assistant/Bleak path owns link security.
         return None
 
     async def write(self, data: bytes) -> None:
@@ -426,10 +420,8 @@ class HomeAssistantGattTransport(EqivaTransport):
         if self._send_characteristic is None:
             raise EqivaConnectionError("Eqiva Send-Characteristic ist nicht verfügbar")
         try:
-            # EXPERIMENTAL OPEN QUESTION: Bleak/proxy exposes a Write Request
-            # only as response=True, which also waits for ATT Write Response.
-            # response=False would emit an ATT Write Command and is explicitly
-            # not equivalent to Raw ATT v37, so it is never used as fallback.
+            # Eqiva uses the characteristic's Write Request path. Do not fall
+            # back to write-without-response because that is an ATT Write Command.
             await client.write_gatt_char(self._send_characteristic, data, response=True)
         except Exception as err:
             raise EqivaConnectionError(

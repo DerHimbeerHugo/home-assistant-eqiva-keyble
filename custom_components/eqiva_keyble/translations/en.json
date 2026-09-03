@@ -4,17 +4,15 @@
     "step": {
       "key_card": {
         "title": "Pair using Key Card",
-        "description": "Scan the QR code on the Eqiva Key Card with a QR code scanner and paste the complete result into the field below. Then hold the unlock button on the lock until the yellow LED flashes and confirm with OK. The QR code data is not stored after successful pairing.\n\nTechnical diagnosis: {error}",
+        "description": "Scan the QR code on the Eqiva Key Card with a QR code scanner and paste the complete result into the field below. Then hold the unlock button on the lock until the yellow LED flashes and confirm with OK. The QR code data is not stored after successful pairing. Home Assistant automatically uses an available connectable Bluetooth path, including ESPHome Bluetooth Proxies.\n\nTechnical diagnosis: {error}",
         "data": {
           "name": "Name",
           "key_card": "Key Card QR data",
           "connection_mode": "Bluetooth connection mode",
-          "transport": "Bluetooth transport",
           "knx_enabled": "Enable KNX"
         },
         "data_description": {
           "connection_mode": "Energy saving connects only when needed. Live keeps the BLE connection open, so commands reach the lock without reconnecting and manual lock changes can be reported immediately in Home Assistant.",
-          "transport": "Automatic is recommended for new setups. While the lock is visible, it keeps the proven Raw ATT path when a local Linux hci adapter is available; otherwise it selects Home Assistant GATT for an ESPHome Bluetooth Proxy. The resolved transport is stored explicitly and never falls back to another transport after a connection error.",
           "knx_enabled": "Uses Home Assistant's existing KNX/IP connection. No second KNX tunnel is opened. The group-address fields appear in the Configuration section of the device page after setup."
         }
       }
@@ -59,13 +57,6 @@
         "polling": "Energy saving – connect only when needed",
         "live": "Live – keep connection open"
       }
-    },
-    "transport": {
-      "options": {
-        "auto": "Automatic – local Raw ATT or Home Assistant GATT",
-        "raw_att": "Raw ATT – local Linux reference",
-        "ha_gatt": "Home Assistant GATT – local adapter / ESPHome proxy"
-      }
     }
   },
   "exceptions": {
@@ -80,16 +71,14 @@
     "step": {
       "init": {
         "title": "Eqiva lock options",
-        "description": "Configure Bluetooth and enable the optional connection to the existing Home Assistant KNX/IP integration. After KNX is enabled, group addresses can be edited in the Configuration section of the device page.",
+        "description": "Configure the connection mode and optionally enable the existing Home Assistant KNX/IP integration. Bluetooth adapter and proxy selection is handled automatically by Home Assistant.",
         "data": {
           "connection_mode": "Bluetooth connection mode",
-          "transport": "Bluetooth transport",
           "poll_interval": "Polling interval (minutes)",
           "knx_enabled": "Enable KNX"
         },
         "data_description": {
           "connection_mode": "Live mode keeps the KeyBLE connection open. An automatic status keepalive at least every 3 minutes prevents the lock's idle timeout; manual changes are reported immediately and genuine disconnects are reconnected automatically. Other Bluetooth clients such as the Eqiva app cannot connect at the same time.",
-          "transport": "Raw ATT keeps the proven local Linux path. Home Assistant GATT supports Home Assistant-selected local adapters and ESPHome Bluetooth Proxies. Changing this option selects one explicit transport; connection errors never trigger cross-transport fallback.",
           "poll_interval": "Time between status synchronizations in energy-saving mode. Live mode uses only the automatic 3-minute keepalive, so this option is hidden there.",
           "knx_enabled": "Uses Home Assistant's existing KNX/IP connection. No second KNX tunnel is opened. Group addresses appear on the device page after enabling KNX."
         }
