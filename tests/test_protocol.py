@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Coroutine
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -18,6 +19,7 @@ from custom_components.eqiva_keyble.protocol import (
     _auth_value,
     _crypt_data,
 )
+from custom_components.eqiva_keyble.raw_att_client import EqivaRawATTClient
 from custom_components.eqiva_keyble.retrying_client import EqivaRetryingKeyBleClient
 from custom_components.eqiva_keyble.transport import (
     DisconnectCallback,
@@ -116,6 +118,36 @@ def test_crypto_round_trip_and_authentication_vector() -> None:
     assert encrypted.hex() == "4cebce4b0153ee41"
     assert _crypt_data(encrypted, MSG_COMMAND, nonce, 1, key) == plain
     assert _auth_value(plain, MSG_COMMAND, nonce, 1, key).hex() == "e424f045"
+
+
+@pytest.mark.asyncio
+async def test_raw_v37_sends_real_write_request_without_response_waiter() -> None:
+    class FakeRawBackend:
+        mtu_size = 23
+
+        def __init__(self) -> None:
+            self.notes: list[str] = []
+            self.pdus: list[bytes] = []
+
+        def _trace_note(self, note: str) -> None:
+            self.notes.append(note)
+
+        async def _send_traced_pdu(self, data: bytes) -> None:
+            self.pdus.append(data)
+
+    backend = FakeRawBackend()
+    characteristic = SimpleNamespace(handle=0x0025)
+    fragment = bytes(range(16))
+
+    await EqivaRawATTClient.write_gatt_char(
+        backend,  # type: ignore[arg-type]
+        characteristic,
+        fragment,
+        response=True,
+    )
+
+    assert backend.pdus == [b"\x12\x25\x00" + fragment]
+    assert backend.notes == ["WRITE:fire-and-forget-request@0x0025"]
 
 
 @pytest.mark.asyncio
