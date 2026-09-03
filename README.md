@@ -28,7 +28,7 @@ service or cloud account is required.
 - Live mode with persistent KeyBLE session, 3-minute keepalive and immediate manual status changes
 - Automatic reconnect with bounded backoff in live mode
 - One safe connection/session retry before an operation starts
-- Selectable Raw ATT reference and experimental Home Assistant GATT transport
+- Selectable local Raw ATT transport and Home Assistant GATT transport with ESPHome Bluetooth Proxy support
 - Optional KNX/IP bridge with freely configurable group addresses
 
 
@@ -100,29 +100,30 @@ connections. The official Eqiva app or another KeyBLE client may therefore be
 unable to connect while live mode is active. Live mode can also increase battery
 usage compared with energy-saving mode.
 
-## Bluetooth transports (v0.4 development)
+## Bluetooth transports (v0.4)
 
 The transport can be changed under **Settings → Devices & services → Eqiva
-Bluetooth Smart Lock → Configure**. Existing installations and new setups
-default to **Raw ATT** so the known-working path does not change silently.
+Bluetooth Smart Lock → Configure**. Existing installations and new setups still
+default to **Raw ATT** during the v0.4 beta so the known-working local path does
+not change silently.
 
-- **Raw ATT** is the proven reference. It requires a local Linux/BlueZ `hci`
-  adapter, keeps MTU 23, and preserves the Eqiva-specific v29/v36/v37 timing.
-- **HA GATT** is experimental. Home Assistant supplies the connectable path, so
-  it can in principle be a local adapter or an ESPHome Bluetooth Proxy. An
-  explicit HA-GATT selection never falls back to Raw ATT.
+- **Raw ATT** is the local Linux/BlueZ reference transport. It requires a local
+  `hci` adapter, keeps MTU 23, and preserves the Eqiva-specific timing needed by
+  the lock.
+- **HA GATT** uses Home Assistant's connectable Bluetooth path. It supports
+  Home Assistant-selected local adapters and has been hardware-confirmed with
+  an ESPHome Bluetooth Proxy for status reads, live notifications, locking and
+  unlocking.
 
-For the first ESPHome Bluetooth Proxy test, explicitly select **HA GATT –
-experimental / proxy test**. The selected transport is written to the debug
-log, and an HA-GATT connection error is returned unchanged instead of being
-hidden by the local Raw-ATT path.
+The Eqiva lock rejects the normal ESPHome/Bleak notification CCCD write before
+the KeyBLE nonce exchange with ATT error `0x05` (insufficient authentication).
+The HA-GATT transport therefore registers the proxy notification callback
+without forcing that protected CCCD write, mirroring the proven Raw-ATT
+notification behavior.
 
-The proxy path is not yet hardware-confirmed. In particular, normal Bleak/proxy
-GATT can send a true Write Request only while also waiting for its ATT Write
-Response. Raw v37 sends the same request opcode but does not wait for that
-response because the KeyBLE notification may arrive first. HA GATT deliberately
-does not replace this with a Write Command; the real lock test must show whether
-the normal response wait is acceptable.
+An explicit HA-GATT selection never silently falls back to Raw ATT. This keeps
+transport failures visible and, most importantly, prevents an ambiguous motor
+command from being repeated on another transport.
 
 ## KNX/IP bridge
 
@@ -142,17 +143,20 @@ battery-low and availability states and answer GroupValueRead requests.
 
 ## Bluetooth requirements
 
-Raw ATT requires a **local Linux/BlueZ Bluetooth adapter** available to Home
-Assistant as an `hci` adapter. The experimental HA-GATT transport instead uses
-Home Assistant's connectable Bluetooth abstraction and has no artificial
-`hciX` restriction. ESPHome Bluetooth Proxy operation remains unconfirmed until
-the v0.4 path has been tested on the real lock.
+**Raw ATT** requires a local Linux/BlueZ Bluetooth adapter available to Home
+Assistant as an `hci` adapter.
+
+**HA GATT** uses Home Assistant's connectable Bluetooth abstraction and does not
+require a local `hciX` path. ESPHome Bluetooth Proxy operation has been confirmed
+on real hardware with the Eqiva 142950A0. As with any BLE connection, reliable
+operation still depends on usable signal strength between the lock and the
+selected adapter or proxy.
 
 Close the official Eqiva app and stop other KeyBLE bridges while pairing or when
 diagnosing connection problems.
 
-The detailed runtime mapping and retained monkey-patch history are documented
-in [`docs/transport-architecture.md`](docs/transport-architecture.md).
+The detailed runtime architecture and the historical development path are
+documented in [`docs/transport-architecture.md`](docs/transport-architecture.md).
 
 ## What's new in v0.3.2
 
@@ -189,6 +193,8 @@ are ported to Python and Home Assistant's Bluetooth stack.
 
 - eQ-3 / Eqiva Bluetooth Smart Lock
 - Model / article number: **142950A0**
+- Local Linux/BlueZ Raw ATT path
+- ESPHome Bluetooth Proxy through Home Assistant GATT (status, live updates and motor commands)
 
 ## License
 
