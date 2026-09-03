@@ -18,7 +18,7 @@ from .protocol import EqivaKeyBleClient, EqivaStatus
 
 _LOGGER = logging.getLogger(__name__)
 
-_DIAGNOSTIC_MARKER = "SESSION-DIAG-v0.2"
+_DIAGNOSTIC_MARKER = "SESSION-DIAG"
 _LIVE_RECONNECT_DELAYS = (2, 5, 10, 20, 30, 60)
 _LIVE_KEEPALIVE_INTERVAL = 3 * 60
 
@@ -55,6 +55,7 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
         self._last_poll_started: float | None = None
         self._last_poll_finished: float | None = None
         self._last_poll_succeeded: bool | None = None
+        self._last_error: str | None = None
 
         if isinstance(client, EqivaLiveKeyBleClient):
             client.set_live_callbacks(
@@ -104,6 +105,7 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
             finished = monotonic()
             self._last_poll_finished = finished
             self._last_poll_succeeded = False
+            self._last_error = f"{type(err).__name__}: {err}"
             _LOGGER.warning(
                 "Eqiva %s: %s poll=%d FAILED after %.3fs error=%s: %s",
                 self.client.address,
@@ -118,6 +120,7 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
         finished = monotonic()
         self._last_poll_finished = finished
         self._last_poll_succeeded = True
+        self._last_error = None
         self._record_live_activity(finished)
         _LOGGER.debug(
             "Eqiva %s: %s poll=%d SUCCESS after %.3fs "
@@ -136,6 +139,7 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
         """Publish a status received immediately after STATUS_CHANGED."""
         if self._stopping:
             return
+        self._last_error = None
         self._record_live_activity()
         self.async_set_updated_data(status)
 
@@ -205,6 +209,7 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
                 except asyncio.CancelledError:
                     raise
                 except Exception as err:  # noqa: BLE001
+                    self._last_error = f"{type(err).__name__}: {err}"
                     _LOGGER.debug(
                         "Eqiva %s: live keepalive failed: %s",
                         self.client.address,
@@ -217,6 +222,7 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
                     self._handle_live_disconnect()
                     continue
 
+                self._last_error = None
                 self._record_live_activity()
                 _LOGGER.debug(
                     "Eqiva %s: live keepalive succeeded after %.3fs",
@@ -236,9 +242,10 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
         if self._stopping or not self.live_mode:
             return
 
-        self.async_set_update_error(
-            UpdateFailed("Bluetooth-Dauerverbindung zum Eqiva Schloss getrennt")
-        )
+        message = "Bluetooth-Dauerverbindung zum Eqiva Schloss getrennt"
+        if self._last_error is None:
+            self._last_error = message
+        self.async_set_update_error(UpdateFailed(message))
         if self._reconnect_task is not None and not self._reconnect_task.done():
             return
 
@@ -264,6 +271,7 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
                     raise
                 except Exception as err:  # noqa: BLE001
                     attempt += 1
+                    self._last_error = f"{type(err).__name__}: {err}"
                     _LOGGER.debug(
                         "Eqiva live reconnect attempt %s failed: %s",
                         attempt,
@@ -276,6 +284,7 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
                     "Eqiva live connection restored after %s reconnect attempt(s)",
                     attempt + 1,
                 )
+                self._last_error = None
                 self._record_live_activity()
                 self.async_set_updated_data(status)
                 return
@@ -285,16 +294,19 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
 
     async def async_lock(self) -> None:
         status = await self.client.lock()
+        self._last_error = None
         self._record_live_activity()
         self.async_set_updated_data(status)
 
     async def async_unlock(self) -> None:
         status = await self.client.unlock()
+        self._last_error = None
         self._record_live_activity()
         self.async_set_updated_data(status)
 
     async def async_open(self) -> None:
         status = await self.client.open()
+        self._last_error = None
         self._record_live_activity()
         self.async_set_updated_data(status)
 
