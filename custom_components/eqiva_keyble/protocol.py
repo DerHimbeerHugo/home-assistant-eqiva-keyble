@@ -627,8 +627,9 @@ class EqivaKeyBleClient:
             self._cancel_waiter(MSG_STATUS_INFO, waiter)
             raise EqivaProtocolError(
                 "Keine STATUS_INFO-Antwort innerhalb von 5 Sekunden empfangen. "
-                "Bei vorhandenen Zugangsdaten kann dies auf eine falsche "
-                "User-ID oder einen falschen User-Key hindeuten."
+                "Die Bluetooth-Verbindung oder die laufende KeyBLE-Sitzung kann "
+                "instabil sein. Tritt dies bereits bei der Ersteinrichtung "
+                "reproduzierbar auf, zusätzlich User-ID und User-Key prüfen."
             ) from err
         except Exception:
             self._cancel_waiter(MSG_STATUS_INFO, waiter)

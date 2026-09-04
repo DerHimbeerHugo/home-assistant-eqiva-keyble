@@ -157,7 +157,7 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
 
         if self._last_live_activity is None:
             self._record_live_activity()
-        self._keepalive_task = self.hass.async_create_task(
+        self._keepalive_task = self.hass.async_create_background_task(
             self._async_live_keepalive_loop(),
             "Eqiva live keepalive",
         )
@@ -249,7 +249,7 @@ class EqivaCoordinator(DataUpdateCoordinator[EqivaStatus]):
         if self._reconnect_task is not None and not self._reconnect_task.done():
             return
 
-        self._reconnect_task = self.hass.async_create_task(
+        self._reconnect_task = self.hass.async_create_background_task(
             self._async_live_reconnect_loop(),
             "Eqiva live reconnect",
         )

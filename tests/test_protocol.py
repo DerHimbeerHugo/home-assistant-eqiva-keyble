@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from custom_components.eqiva_keyble.exceptions import EqivaConnectionError
+from custom_components.eqiva_keyble.ha_gatt_transport import HomeAssistantGattTransport
 from custom_components.eqiva_keyble.protocol import (
     MSG_COMMAND,
     MSG_CONNECTION_INFO,
@@ -20,6 +21,7 @@ from custom_components.eqiva_keyble.protocol import (
     _crypt_data,
 )
 from custom_components.eqiva_keyble.raw_att_client import EqivaRawATTClient
+from custom_components.eqiva_keyble.raw_att_transport import RawAttTransport
 from custom_components.eqiva_keyble.retrying_client import EqivaRetryingKeyBleClient
 from custom_components.eqiva_keyble.transport import (
     DisconnectCallback,
@@ -148,6 +150,42 @@ async def test_raw_v37_sends_real_write_request_without_response_waiter() -> Non
 
     assert backend.pdus == [b"\x12\x25\x00" + fragment]
     assert backend.notes == ["WRITE:fire-and-forget-request@0x0025"]
+
+
+@pytest.mark.parametrize(
+    "transport_class",
+    [RawAttTransport, HomeAssistantGattTransport],
+)
+def test_transport_ignores_disconnect_from_stale_client(transport_class) -> None:
+    transport = transport_class(
+        FakeHass(),
+        "00:11:22:33:44:55",
+        "Test lock",
+    )
+    current_client = SimpleNamespace(is_connected=True)
+    stale_client = SimpleNamespace(is_connected=False)
+    send_characteristic = object()
+    receive_characteristic = object()
+    disconnects: list[str] = []
+
+    transport._client = current_client
+    transport._send_characteristic = send_characteristic
+    transport._receive_characteristic = receive_characteristic
+    transport._disconnected_callback = lambda: disconnects.append("disconnect")
+
+    transport._handle_disconnect(stale_client)
+
+    assert transport._client is current_client
+    assert transport._send_characteristic is send_characteristic
+    assert transport._receive_characteristic is receive_characteristic
+    assert disconnects == []
+
+    transport._handle_disconnect(current_client)
+
+    assert transport._client is None
+    assert transport._send_characteristic is None
+    assert transport._receive_characteristic is None
+    assert disconnects == ["disconnect"]
 
 
 @pytest.mark.asyncio

@@ -183,8 +183,15 @@ class HomeAssistantGattTransport(EqivaTransport):
             )
 
     def _handle_disconnect(self, disconnected_client: BleakClient) -> None:
-        if self._client is disconnected_client:
-            self._client = None
+        if self._client is not disconnected_client:
+            _LOGGER.debug(
+                "Eqiva %s: transport=%s ignoring disconnect callback from "
+                "stale or intentionally released client",
+                self.address,
+                self.kind,
+            )
+            return
+        self._client = None
         self._send_characteristic = None
         self._receive_characteristic = None
         if (
