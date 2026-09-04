@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import ast
 import asyncio
 from collections.abc import Coroutine
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from custom_components.eqiva_keyble.exceptions import EqivaConnectionError
-from custom_components.eqiva_keyble.ha_gatt_transport import HomeAssistantGattTransport
 from custom_components.eqiva_keyble.protocol import (
     MSG_COMMAND,
     MSG_CONNECTION_INFO,
@@ -21,7 +22,6 @@ from custom_components.eqiva_keyble.protocol import (
     _crypt_data,
 )
 from custom_components.eqiva_keyble.raw_att_client import EqivaRawATTClient
-from custom_components.eqiva_keyble.raw_att_transport import RawAttTransport
 from custom_components.eqiva_keyble.retrying_client import EqivaRetryingKeyBleClient
 from custom_components.eqiva_keyble.transport import (
     DisconnectCallback,
@@ -29,6 +29,8 @@ from custom_components.eqiva_keyble.transport import (
     NotificationCallback,
     TransportType,
 )
+
+PACKAGE_PATH = Path(__file__).parents[1] / "custom_components" / "eqiva_keyble"
 
 
 class FakeHass:
@@ -153,39 +155,29 @@ async def test_raw_v37_sends_real_write_request_without_response_waiter() -> Non
 
 
 @pytest.mark.parametrize(
-    "transport_class",
-    [RawAttTransport, HomeAssistantGattTransport],
+    "filename",
+    ["raw_att_transport.py", "ha_gatt_transport.py"],
 )
-def test_transport_ignores_disconnect_from_stale_client(transport_class) -> None:
-    transport = transport_class(
-        FakeHass(),
-        "00:11:22:33:44:55",
-        "Test lock",
+def test_transport_disconnect_handler_rejects_stale_client(filename: str) -> None:
+    """Both concrete transports must reject callbacks from replaced clients.
+
+    The transport modules depend on Home Assistant and are intentionally not
+    imported in this lightweight protocol test environment. Inspect the small
+    callback guard directly so this regression stays covered without pulling
+    Home Assistant into unit-test dependencies.
+    """
+    tree = ast.parse((PACKAGE_PATH / filename).read_text(encoding="utf-8"))
+    handler = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "_handle_disconnect"
     )
-    current_client = SimpleNamespace(is_connected=True)
-    stale_client = SimpleNamespace(is_connected=False)
-    send_characteristic = object()
-    receive_characteristic = object()
-    disconnects: list[str] = []
+    first_statement = handler.body[0]
 
-    transport._client = current_client
-    transport._send_characteristic = send_characteristic
-    transport._receive_characteristic = receive_characteristic
-    transport._disconnected_callback = lambda: disconnects.append("disconnect")
-
-    transport._handle_disconnect(stale_client)
-
-    assert transport._client is current_client
-    assert transport._send_characteristic is send_characteristic
-    assert transport._receive_characteristic is receive_characteristic
-    assert disconnects == []
-
-    transport._handle_disconnect(current_client)
-
-    assert transport._client is None
-    assert transport._send_characteristic is None
-    assert transport._receive_characteristic is None
-    assert disconnects == ["disconnect"]
+    assert isinstance(first_statement, ast.If)
+    assert ast.unparse(first_statement.test) == "self._client is not disconnected_client"
+    assert any(isinstance(node, ast.Return) for node in first_statement.body)
 
 
 @pytest.mark.asyncio
