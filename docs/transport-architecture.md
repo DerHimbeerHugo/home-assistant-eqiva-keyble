@@ -9,15 +9,15 @@ Eqiva Coordinator
     │
 KeyBLE session / protocol
     │
-internal backend selection (not user-configurable)
+adaptive backend selection (not user-configurable)
     │
-    ├── local Linux/BlueZ hci path ──> RawAttTransport
-    │                                  │
-    │                                  └── raw L2CAP/ATT, MTU 23
+    ├── strongest suitable local Linux/BlueZ hci path ──> RawAttTransport
+    │                                                     │
+    │                                                     └── raw L2CAP/ATT, MTU 23
     │
-    └── ESPHome / non-local HA path ─> HomeAssistantGattTransport
-                                       │
-                                       └── Home Assistant Bluetooth / Bleak
+    └── stronger ESPHome / non-local HA path ───────────> HomeAssistantGattTransport
+                                                          │
+                                                          └── Home Assistant Bluetooth / Bleak
 ```
 
 The KeyBLE protocol owns framing, AES authentication/encryption, nonces, counters, pairing, status requests and motor commands. Home Assistant supplies Bluetooth discovery and the current connectable scanner paths. The user never chooses a transport.
@@ -34,12 +34,18 @@ Because the normal BlueZ GATT API cannot express that wire behavior, v0.4 keeps 
 
 There is no transport selector in the config flow or options flow.
 
-Before a KeyBLE client is created, the integration checks Home Assistant's current connectable paths for the lock:
+Immediately before every new Bluetooth connection, including reconnects, the integration compares Home Assistant's current connectable paths for the lock:
 
-- when a usable local Linux `hci` path is present, `RawAttTransport` is selected;
-- otherwise `HomeAssistantGattTransport` is selected, allowing an ESPHome Bluetooth Proxy or another non-local Home Assistant path to provide the connection.
+- the strongest usable local Linux `hci` path is the Raw ATT candidate;
+- the strongest non-local Home Assistant path, such as an ESPHome Bluetooth Proxy, is the HA GATT candidate;
+- on the first selection the stronger RSSI wins, with a tie preferring the proven local Raw ATT path;
+- after a backend has been used, the alternative must be at least 6 dB stronger before a reconnect switches to it.
 
-The selection happens before session establishment. A motor command is never replayed on another backend after it has been sent.
+The 6 dB hysteresis prevents normal RSSI jitter from making reconnects bounce between two similarly strong adapters. If the HA GATT path is selected, that connection attempt is pinned to the selected Home Assistant scanner source so a stronger proxy cannot silently fall back to a weaker local BlueZ-GATT path.
+
+The concrete backend is reevaluated only when a new BLE connection is required. An established live connection is never migrated just because another scanner later reports a slightly better RSSI.
+
+Selection and connection/session retry happen before a motor command is sent. A motor command is never replayed on another backend after it has been sent.
 
 ## Local Raw ATT compatibility path
 
@@ -60,12 +66,14 @@ This is the consolidated effective v29/v36/v37 behavior. Historical diagnostic a
 
 For non-local Home Assistant paths, `HomeAssistantGattTransport`:
 
-1. waits for a fresh connectable advertisement;
-2. asks Home Assistant for the current connectable `BLEDevice`;
+1. waits for a fresh connectable advertisement from the selected scanner source;
+2. uses the `BLEDevice` belonging to that selected source;
 3. connects through `bleak-retry-connector`;
 4. discovers the Eqiva send and receive characteristics;
 5. registers notifications;
 6. hands received bytes to the transport-independent KeyBLE protocol.
+
+When no current scanner path is known yet, discovery is delegated to Home Assistant. On the next connection/session retry the adaptive selector reevaluates the newly discovered paths.
 
 ### ESPHome notification special case
 
@@ -93,14 +101,19 @@ This invariant is covered by the unit test `test_motor_command_is_not_repeated_a
 
 Live mode keeps the BLE and KeyBLE session open. It provides immediate processing of `STATUS_CHANGED`, an automatic status keepalive after at most three idle minutes and bounded reconnect backoff after a genuine disconnect.
 
+A reconnect causes the adaptive Bluetooth selector to compare the available paths again. It does not interrupt a healthy live session only to chase RSSI changes.
+
 Energy-saving mode connects only for a status update or command and closes the session afterwards.
 
 ## Diagnostics
 
 Home Assistant diagnostics include:
 
+- adaptive selection state and reason
+- local candidate source and RSSI
+- non-local candidate source and RSSI
 - selected internal backend (`raw_att` or `ha_gatt`)
-- path type (`local_raw_att`, `esphome_proxy`, `local_bluez` or Home Assistant GATT)
+- active path type (`local_raw_att`, `esphome_proxy`, `local_bluez` or Home Assistant GATT)
 - Bluetooth source / adapter when available
 - RSSI
 - notification mode
@@ -120,5 +133,7 @@ Real Eqiva 142950A0 hardware has confirmed:
 - live notifications;
 - unlock;
 - lock.
+
+The adaptive RSSI-based path selection introduced for the v0.4.2 beta series is deliberately being hardware-tested before the next stable release.
 
 The unsuccessful local BlueZ-GATT-only experiment is retained in Git history as evidence for why the local compatibility backend is still required.

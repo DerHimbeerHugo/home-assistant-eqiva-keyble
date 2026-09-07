@@ -8,6 +8,7 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
+from .adaptive_transport import AdaptiveTransport
 from .const import CONF_ADDRESS, CONF_USER_ID, CONF_USER_KEY
 from .ha_gatt_transport import HomeAssistantGattTransport
 from .raw_att_transport import RawAttTransport, local_raw_path
@@ -33,6 +34,23 @@ def _transport_diagnostics(transport: Any) -> dict[str, Any]:
         "connected": transport.is_connected,
     }
 
+    if isinstance(transport, AdaptiveTransport):
+        data.update(
+            {
+                "path_type": "adaptive",
+                "selection_reason": transport._selection_reason,
+                "selected_source": transport._selected_source,
+                "local_source": transport._local_source,
+                "local_rssi": transport._local_rssi,
+                "nonlocal_source": transport._nonlocal_source,
+                "nonlocal_rssi": transport._nonlocal_rssi,
+            }
+        )
+        active_transport = transport.active_transport
+        if active_transport is not None:
+            data["active_transport"] = _transport_diagnostics(active_transport)
+        return data
+
     if isinstance(transport, HomeAssistantGattTransport):
         backend = getattr(transport, "_backend_name", None)
         backend_lower = (backend or "").lower()
@@ -47,6 +65,7 @@ def _transport_diagnostics(transport: Any) -> dict[str, Any]:
                 "path_type": path_type,
                 "backend": backend,
                 "source": getattr(transport, "_device_source", None),
+                "preferred_source": getattr(transport, "_preferred_source", None),
                 "rssi": getattr(transport, "_rssi", None),
                 "notify_mode": getattr(transport, "_notify_mode", None),
             }

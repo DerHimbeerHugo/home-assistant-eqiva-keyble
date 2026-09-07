@@ -42,9 +42,10 @@ def _consume_task_result(task: asyncio.Task[Any]) -> None:
 class HomeAssistantGattTransport(EqivaTransport):
     """GATT transport through Home Assistant's Bluetooth stack.
 
-    Home Assistant supplies the connectable BLEDevice. That device may belong
-    to a local adapter or an ESPHome Bluetooth proxy; this transport never
-    filters the path to hciX.
+    When ``preferred_source`` is set, the transport is pinned to that Home
+    Assistant scanner source for the duration of this connection attempt. This
+    lets the adaptive selector deliberately use a stronger ESPHome proxy instead
+    of falling back to a weaker local BlueZ path.
     """
 
     kind = TransportType.HA_GATT
@@ -54,9 +55,12 @@ class HomeAssistantGattTransport(EqivaTransport):
         hass: HomeAssistant,
         address: str,
         name: str,
+        *,
+        preferred_source: str | None = None,
     ) -> None:
         super().__init__(address, name)
         self.hass = hass
+        self._preferred_source = preferred_source
         self._client: BleakClient | None = None
         self._send_characteristic: Any | None = None
         self._receive_characteristic: Any | None = None
@@ -71,9 +75,31 @@ class HomeAssistantGattTransport(EqivaTransport):
     def is_connected(self) -> bool:
         return bool(self._client is not None and self._client.is_connected)
 
+    def _preferred_path(self):
+        if self._preferred_source is None:
+            return None
+        paths = bluetooth.async_scanner_devices_by_address(
+            self.hass,
+            self.address,
+            connectable=True,
+        )
+        return next(
+            (
+                path
+                for path in paths
+                if str(path.scanner.source) == self._preferred_source
+            ),
+            None,
+        )
+
     def _fresh_ble_device(self):
+        if self._preferred_source is not None:
+            path = self._preferred_path()
+            return path.ble_device if path is not None else None
         return bluetooth.async_ble_device_from_address(
-            self.hass, self.address, connectable=True
+            self.hass,
+            self.address,
+            connectable=True,
         )
 
     def _capture_device_details(self, device: Any) -> None:
@@ -92,10 +118,23 @@ class HomeAssistantGattTransport(EqivaTransport):
             )
 
         paths = bluetooth.async_scanner_devices_by_address(
-            self.hass, self.address, connectable=True
+            self.hass,
+            self.address,
+            connectable=True,
         )
-        if paths:
-            strongest = max(
+        selected = None
+        if self._preferred_source is not None:
+            selected = next(
+                (
+                    path
+                    for path in paths
+                    if str(path.scanner.source) == self._preferred_source
+                ),
+                None,
+            )
+            self._device_source = self._preferred_source
+        elif paths:
+            selected = max(
                 paths,
                 key=lambda path: (
                     path.advertisement.rssi
@@ -103,12 +142,14 @@ class HomeAssistantGattTransport(EqivaTransport):
                     else -127
                 ),
             )
-            self._rssi = strongest.advertisement.rssi
+
+        if selected is not None:
+            self._rssi = selected.advertisement.rssi
             if self._device_source is None:
-                self._device_source = str(strongest.scanner.source)
+                self._device_source = str(selected.scanner.source)
 
     async def _wait_for_fresh_advertisement(self) -> None:
-        """Wait for a new advertisement from any connectable HA path."""
+        """Wait for a new advertisement from the selected HA path."""
         loop = asyncio.get_running_loop()
         started = loop.time()
         seen: asyncio.Future[tuple[str | None, int | None]] = loop.create_future()
@@ -118,9 +159,15 @@ class HomeAssistantGattTransport(EqivaTransport):
         def _advertisement_received(service_info, _change) -> None:
             if seen.done():
                 return
+            source = getattr(service_info, "source", None)
+            if (
+                self._preferred_source is not None
+                and str(source) != self._preferred_source
+            ):
+                return
             seen.set_result(
                 (
-                    getattr(service_info, "source", None),
+                    source,
                     getattr(service_info, "rssi", None),
                 )
             )
@@ -142,14 +189,19 @@ class HomeAssistantGattTransport(EqivaTransport):
             async with asyncio.timeout(_ADVERTISEMENT_TIMEOUT):
                 source, rssi = await seen
         except TimeoutError as err:
+            source_text = (
+                f" über Quelle {self._preferred_source}"
+                if self._preferred_source is not None
+                else ""
+            )
             raise EqivaNotFoundError(
                 "Innerhalb von 12 Sekunden wurde kein neues connectable "
-                "Eqiva-Advertisement über Home Assistant empfangen"
+                f"Eqiva-Advertisement über Home Assistant{source_text} empfangen"
             ) from err
         finally:
             unload()
 
-        self._device_source = source
+        self._device_source = str(source) if source is not None else None
         self._rssi = rssi
         deadline = loop.time() + 0.75
         while loop.time() < deadline:
@@ -160,15 +212,17 @@ class HomeAssistantGattTransport(EqivaTransport):
             raise EqivaNotFoundError(
                 "Frisches connectable Eqiva-Advertisement empfangen, aber "
                 "Home Assistant hat danach kein verbindbares BLEDevice "
-                "bereitgestellt"
+                "für den ausgewählten Pfad bereitgestellt"
             )
         _LOGGER.debug(
-            "Eqiva %s: transport=%s fresh advertisement after %.3fs source=%s rssi=%s",
+            "Eqiva %s: transport=%s fresh advertisement after %.3fs "
+            "source=%s rssi=%s preferred_source=%s",
             self.address,
             self.kind,
             loop.time() - started,
             source or "unknown",
             rssi if rssi is not None else "unknown",
+            self._preferred_source or "auto",
         )
 
     async def _clear_stale_connection(self) -> None:
@@ -306,7 +360,7 @@ class HomeAssistantGattTransport(EqivaTransport):
             if device is None:
                 raise EqivaNotFoundError(
                     f"{self.address} wurde von Home Assistant Bluetooth nicht "
-                    "als connectable Gerät bereitgestellt"
+                    "als connectable Gerät für den ausgewählten Pfad bereitgestellt"
                 )
             self._capture_device_details(device)
 
