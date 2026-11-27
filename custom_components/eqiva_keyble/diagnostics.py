@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from homeassistant.components.diagnostics import async_redact_data
@@ -13,7 +14,23 @@ from .const import CONF_ADDRESS, CONF_USER_ID, CONF_USER_KEY
 from .ha_gatt_transport import HomeAssistantGattTransport
 from .raw_att_transport import RawAttTransport, local_raw_path
 
-_TO_REDACT = [CONF_ADDRESS, CONF_USER_ID, CONF_USER_KEY]
+_TO_REDACT = [CONF_ADDRESS, CONF_USER_ID, CONF_USER_KEY, "unique_id"]
+
+
+def _redact_last_error(error: str | None, address: str | None) -> str | None:
+    """Remove Bluetooth addresses from diagnostic error messages."""
+    if error is None:
+        return None
+    if address:
+        compact = re.sub(r"[:-]", "", address)
+        if re.fullmatch(r"[0-9a-fA-F]{12}", compact):
+            pattern = r"[:-]?".join(compact[i:i + 2] for i in range(0, 12, 2))
+            error = re.sub(pattern, "**REDACTED**", error, flags=re.IGNORECASE)
+    return re.sub(
+        r"(?i)(?<![0-9a-f])(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}(?![0-9a-f])",
+        "**REDACTED**",
+        error,
+    )
 
 
 def _status_diagnostics(status: Any) -> dict[str, Any] | None:
@@ -108,7 +125,9 @@ async def async_get_config_entry_diagnostics(
             "poll_interval_minutes": coordinator.poll_interval_minutes,
             "live_mode": coordinator.live_mode,
             "last_update_success": coordinator.last_update_success,
-            "last_error": coordinator._last_error,
+            "last_error": _redact_last_error(
+                coordinator._last_error, entry.data.get(CONF_ADDRESS)
+            ),
             "poll_sequence": coordinator._poll_sequence,
             "last_poll_succeeded": coordinator._last_poll_succeeded,
             "transport": _transport_diagnostics(client.transport),
