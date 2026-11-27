@@ -30,12 +30,13 @@ Motor commands are deliberately never retried after they have been sent. A Bluet
 ## Installation with HACS
 
 1. Open **HACS** in Home Assistant.
-2. Open the menu and choose **Custom repositories**.
-3. Add `https://github.com/DerHimbeerHugo/home-assistant-eqiva-keyble`.
-4. Select repository type **Integration**.
-5. Install **Eqiva Bluetooth Smart Lock**.
-6. Restart Home Assistant.
-7. Go to **Settings → Devices & services → Add integration** and search for **Eqiva Bluetooth Smart Lock**.
+2. Search for **Eqiva Bluetooth Smart Lock** and install the integration.
+3. Restart Home Assistant.
+4. Go to **Settings → Devices & services → Add integration** and search for **Eqiva Bluetooth Smart Lock**.
+
+### Custom repository fallback
+
+If the integration is not yet listed in HACS, open the HACS menu, choose **Custom repositories**, add `https://github.com/DerHimbeerHugo/home-assistant-eqiva-keyble` as an **Integration**, and then follow the installation steps above.
 
 ## Pairing with the Eqiva Key Card
 
